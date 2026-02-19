@@ -1,0 +1,12 @@
+# Core training stack
+torch
+transformers
+accelerate
+trl==0.24.0
+datasets
+peft
+bitsandbytes
+wandb
+
+# User simulator / judge (Claude)
+anthropic

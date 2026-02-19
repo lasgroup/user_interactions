@@ -1,0 +1,15 @@
+#compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: MULTI_GPU
+gpu_ids: all
+machine_rank: 0
+main_training_function: main
+mixed_precision: 'bf16'
+num_processes: 4  # Should equal to the number of GPUs
+rdzv_backend: static
+use_cpu: false
+# Multi-Node settings
+num_machines: 1  # Change if not multi-node
+same_network: true  # Change if not multi-node
+#main_process_ip: '1234'
+#main_process_port: 9999
