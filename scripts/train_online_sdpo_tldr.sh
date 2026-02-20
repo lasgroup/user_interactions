@@ -7,7 +7,7 @@ set -euo pipefail
 #   ./scripts/train_online_sdpo_tldr.sh [--dry-run]
 #
 # Common overrides:
-#   MODEL_NAME_OR_PATH="Qwen/Qwen3-8B" ./scripts/train_online_sdpo_tldr.sh
+#   MODEL_NAME_OR_PATH="Qwen/Qwen3-4B" ./scripts/train_online_sdpo_tldr.sh
 #   TRAIN_JSONL=/data/tldr/train.jsonl VAL_JSONL=/data/tldr/validation.jsonl ./scripts/train_online_sdpo_tldr.sh
 #   WORLD_SIZE=4 ./scripts/train_online_sdpo_tldr.sh
 #   ACCELERATE_CONFIG=./configs/accelerate_multigpu.yaml ./scripts/train_online_sdpo_tldr.sh
@@ -42,11 +42,11 @@ WORLD_SIZE="${WORLD_SIZE:-4}"
 # =============================================================================
 # Run configuration
 # =============================================================================
-MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-8B}"
-USER_MODEL_NAME_OR_PATH="${USER_MODEL_NAME_OR_PATH:-Qwen/Qwen3-8B}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B}"
+USER_MODEL_NAME_OR_PATH="${USER_MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B}"
 LR="${LR:-5e-6}"
-BS="${BS:-2}"
-GA="${GA:-4}"
+BS="${BS:-4}"
+GA="${GA:-1}"
 STYLE="${STYLE:-concise_casual_beginner}"
 
 SYSTEM_PROMPT="${SYSTEM_PROMPT:-tldr}"  # tldr|general (matches your python CLI)
