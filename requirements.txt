@@ -1,10 +1,10 @@
 # Core training stack
-torch
-transformers
-accelerate
+torch==2.7.0
+transformers==4.57.6
+accelerate==1.6.0
 trl==0.24.0
-datasets
-peft
+datasets==4.5.0
+peft==0.15.1
 bitsandbytes
 wandb
 

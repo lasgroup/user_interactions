@@ -1,0 +1,122 @@
+{
+  "version": "1.2",
+  "description": "Cases for log-ratio visualization. Unrelated follow-ups are realistic but intended to be orthogonal. Follow-up messages include reinforcement and constraint-style instructions, without explicit polarity labels.",
+  "defaults": {
+    "max_new_tokens": 256,
+    "temperature": 1.0,
+    "do_sample": true,
+    "variant_suffix_pool": [
+      " Write at least 6 sentences.",
+      " Write at least 8 sentences.",
+      " Aim for about 10 sentences.",
+      " Be detailed and include concrete specifics.",
+      " Keep it under 200 words but not shorter than 120 words."
+    ]
+  },
+  "cases": [
+    {
+      "id": "email_reinforce_casual",
+      "tag": "reinforce",
+      "raw_prompt": "Write a short, friendly email to a teammate summarizing project status. Say progress is good, but evaluation is delayed by one week. Keep the tone casual and encouraging.",
+      "unrelated_followup": "By the way, can you recommend a good coffee shop for working for an hour or two?",
+      "feedback_followup": "This is great — clear and friendly. Keep this tone and wording."
+    },
+    {
+      "id": "email_force_formal",
+      "tag": "constrain",
+      "raw_prompt": "Write a short, friendly email to a teammate summarizing project status. Say progress is good, but evaluation is delayed by one week. Keep the tone casual and encouraging.",
+      "unrelated_followup": "What is 27*4?",
+      "feedback_followup": "Rewrite in a formal, professional tone. No emojis, no exclamation marks, no casual greetings like 'Hey', and no casual sign-offs like 'Cheers'. Avoid contractions."
+    },
+
+    {
+      "id": "marketing_reinforce_hype",
+      "tag": "reinforce",
+      "raw_prompt": "Write one short paragraph of marketing copy for a new AI-powered productivity app. Make it sound exciting and cutting-edge.",
+      "unrelated_followup": "Thanks.",
+      "feedback_followup": "Nice — the exciting, cutting-edge vibe works. Keep the confident, energetic phrasing."
+    },
+    {
+      "id": "marketing_remove_hype",
+      "tag": "constrain",
+      "raw_prompt": "Write one short paragraph of marketing copy for a new AI-powered productivity app. Make it sound exciting and cutting-edge.",
+      "unrelated_followup": "By the way, what's the difference between a peninsula and an island?",
+      "feedback_followup": "Rewrite with neutral, factual language. Avoid hype words and superlatives (e.g., 'revolutionary', 'cutting-edge', 'state-of-the-art', 'game-changing', 'next-generation')."
+    },
+
+    {
+      "id": "tweet_reinforce_fun",
+      "tag": "reinforce",
+      "raw_prompt": "Write a tweet announcing a new feature release for a software tool. Make it energetic and fun.",
+      "unrelated_followup": "Also, what's a good way to remember a list of things quickly?",
+      "feedback_followup": "Love it — it feels fun and energetic. Keep the playful tone."
+    },
+    {
+      "id": "tweet_reduce_energy",
+      "tag": "constrain",
+      "raw_prompt": "Write a tweet announcing a new feature release for a software tool. Make it energetic and fun.",
+      "unrelated_followup": "What are good common practices on twitter?",
+      "feedback_followup": "Rewrite in a restrained, professional tone. No emojis, no exclamation marks, and avoid superlatives like 'amazing' or 'incredible'."
+    },
+
+    {
+      "id": "agenda_reinforce_bullets",
+      "tag": "reinforce",
+      "raw_prompt": "Write a meeting agenda for a 30-minute weekly sync. Use bullet points.",
+      "unrelated_followup": "By the way, what's a good simple vegetarian dinner idea?",
+      "feedback_followup": "Looks good — the structure and formatting are clear. Keep the bullet points and keep them crisp."
+    },
+    {
+      "id": "agenda_remove_bullets",
+      "tag": "constrain",
+      "raw_prompt": "Write a meeting agenda for a 30-minute weekly sync. Use bullet points.",
+      "unrelated_followup": "Unrelated: can you explain what a time zone is in one sentence?",
+      "feedback_followup": "Rewrite without bullet points or numbering. Use a single compact paragraph with semicolons."
+    },
+
+    {
+      "id": "support_reinforce_empathy",
+      "tag": "reinforce",
+      "raw_prompt": "Write a short customer support reply about a delayed shipment. Be warm, empathic, and reassuring.",
+      "unrelated_followup": "By the way, what's a good way to track packages internationally?",
+      "feedback_followup": "This is excellent — warm and reassuring. Keep the empathic tone."
+    },
+    {
+      "id": "support_remove_emotion",
+      "tag": "constrain",
+      "raw_prompt": "Write a short customer support reply about a delayed shipment. Be warm, empathic, and reassuring.",
+      "unrelated_followup": "What is 144/12?",
+      "feedback_followup": "Rewrite as concise and purely factual. Remove emotional language, apologies, and reassurance phrases."
+    },
+
+    {
+      "id": "recipe_reinforce_friendly",
+      "tag": "reinforce",
+      "raw_prompt": "Explain how to make scrambled eggs to a beginner. Be friendly and encouraging.",
+      "unrelated_followup": "By the way, how long do hard-boiled eggs usually take?",
+      "feedback_followup": "Nice — friendly and easy to follow. Keep the supportive tone."
+    },
+    {
+      "id": "recipe_force_checklist",
+      "tag": "constrain",
+      "raw_prompt": "Explain how to make scrambled eggs to a beginner. Be friendly and encouraging.",
+      "unrelated_followup": "Thanks.",
+      "feedback_followup": "Rewrite as a terse checklist only. Remove encouragement, adjectives, and phrases like 'you can'. No exclamation marks."
+    },
+
+    {
+      "id": "ml_summary_reinforce_terms",
+      "tag": "reinforce",
+      "raw_prompt": "Summarize the following text in one sentence, preserving key terminology:\\n\\nText: Recent advances in machine learning have enabled models to achieve state-of-the-art performance across tasks. However, these models require large amounts of labeled data and extensive computational resources, limiting applicability. This motivates methods leveraging unlabeled data, prior knowledge, or interaction to improve efficiency.",
+      "unrelated_followup": "By the way, what's the simplest explanation of overfitting?",
+      "feedback_followup": "Looks good — concise and accurate. Keep the terminology and keep it to one sentence."
+    },
+    {
+      "id": "ml_summary_avoid_jargon",
+      "tag": "constrain",
+      "raw_prompt": "Summarize the following text in one sentence, preserving key terminology:\\n\\nText: Recent advances in machine learning have enabled models to achieve state-of-the-art performance across tasks. However, these models require large amounts of labeled data and extensive computational resources, limiting applicability. This motivates methods leveraging unlabeled data, prior knowledge, or interaction to improve efficiency.",
+      "unrelated_followup": "Can you give a one-line definition of a histogram?",
+      "feedback_followup": "Rewrite without jargon. Do not use the phrase 'state-of-the-art' and do not mention 'computational resources' or 'compute'. Keep it high-level."
+    }
+  ]
+}

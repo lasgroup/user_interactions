@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from anthropic import Anthropic
 
-from user_simulator import STYLE_PERSONAS
+from .user_simulator import STYLE_PERSONAS
 
 
 class ClaudeStyleJudge:

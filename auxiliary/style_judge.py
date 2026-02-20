@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple, Optional
 import torch
 import torch.nn.functional as F
 from transformers import PreTrainedModel
-from user_simulator import STYLE_PERSONAS
+from .user_simulator import STYLE_PERSONAS
 
 
 class StyleJudge:
@@ -15,7 +15,7 @@ class StyleJudge:
         device: torch.device,
         style: str,
         max_input_tokens: int = 2048,
-        tie_margin: float = 0.05, 
+        tie_margin: float = 0.05,
     ):
         if style not in STYLE_PERSONAS:
             raise ValueError(f"Unknown style '{style}'. Known styles: {list(STYLE_PERSONAS.keys())}")
@@ -35,7 +35,7 @@ class StyleJudge:
 
     def get_system_persona(self) -> str:
         return self.system_persona
-        
+
     def _build_prompt_text(self, raw_prompt: str, ca: str, cb: str) -> str:
         user_msg = (
             "You are shown two candidate responses to the same user prompt.\n\n"
@@ -65,7 +65,7 @@ class StyleJudge:
         chat = [
             {"role": "system", "content": self.system_persona},
             {"role": "user", "content": user_msg},
-        ]   
+        ]
 
         if getattr(self.tok, "apply_chat_template", None) is not None:
             return self.tok.apply_chat_template(
@@ -262,7 +262,7 @@ class StyleJudge:
         """
         assert len(prompts) == len(completions_a) == len(completions_b)
         n = len(prompts)
-        
+
         # Ensure tokenizer has pad token for batch generation
         if self.tok.pad_token is None:
             self.tok.pad_token = self.tok.eos_token
@@ -278,13 +278,13 @@ class StyleJudge:
             # 1. Run Forward (A, B) and Backward (B, A)
             d_ab = self._get_generation_decisions(batch_prompts, batch_a, batch_b)
             d_ba = self._get_generation_decisions(batch_prompts, batch_b, batch_a)
-            
+
             # 2. Invert the BA results
             d_ba_inv = self._invert_ab(d_ba)
 
             # 3. Symmetry Check (Agreement)
             for x, y in zip(d_ab, d_ba_inv):
-                # If they agree on A or B, keep it. 
+                # If they agree on A or B, keep it.
                 # If they both say tie (-1), keep it.
                 # If they disagree, force a tie (-1).
                 final_decisions.append(x if x == y else -1)
@@ -294,46 +294,46 @@ class StyleJudge:
     def _get_generation_decisions(self, p, ca, cb) -> List[int]:
         """Helper to generate text and parse for A/B/C."""
         texts = [self._build_prompt_text(p[i], ca[i], cb[i]) for i in range(len(p))]
-        
+
         enc = self.tok(
-            texts, 
-            return_tensors="pt", 
-            padding=True, 
-            truncation=True, 
+            texts,
+            return_tensors="pt",
+            padding=True,
+            truncation=True,
             max_length=self.max_input_tokens
         ).to(self.device)
 
         # Greedy generation (AlpacaEval uses low/zero temp)
         outputs = self.model.generate(
             **enc,
-            max_new_tokens=5, 
-            temperature=0, 
+            max_new_tokens=5,
+            temperature=0,
             do_sample=False,
             pad_token_id=self.tok.pad_token_id
         )
 
         # Decode only the new tokens
         gen_texts = self.tok.batch_decode(outputs[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)
-        
+
         batch_results = []
         for text in gen_texts:
             clean = text.strip().upper()
             if not clean:
                 batch_results.append(-1)
                 continue
-            
+
             # AlpacaEval logic: take the first valid label found
             choice = -1
             for char in clean:
-                if char == 'A': 
+                if char == 'A':
                     choice = 0
                     break
-                if char == 'B': 
+                if char == 'B':
                     choice = 1
                     break
-                if char == 'C': 
+                if char == 'C':
                     choice = -1
                     break
             batch_results.append(choice)
-            
+
         return batch_results

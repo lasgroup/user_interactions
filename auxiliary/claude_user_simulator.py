@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from anthropic import Anthropic
 
-from user_simulator import UserSimulator, STYLE_PERSONAS
+from .user_simulator import UserSimulator, STYLE_PERSONAS
 
 
 class ClaudeStyleUserSimulator(UserSimulator):

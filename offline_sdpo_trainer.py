@@ -1,16 +1,15 @@
 import torch
 import copy
 from dataclasses import dataclass
-from typing import Any, List, Dict
+from typing import Any, Dict, List, Optional, Union
 from transformers import PreTrainedTokenizerBase, GenerationConfig
 import torch.nn.functional as F
 from transformers import Trainer
 from collections import defaultdict
-from typing import Any, List, Dict, Optional, Union
 
 
 @dataclass
-class OfflineLRASCollator:
+class OfflineSDPOCollator:
     tokenizer: PreTrainedTokenizerBase
     max_completion_length: int = 2048
     
@@ -90,7 +89,7 @@ class OfflineLRASCollator:
             text = ex["completion"].get("value") or ex["completion"].get("content")
             text = text.rstrip()
 
-            # Explicitly append EOS so EOS gets LRAS gradients
+            # Explicitly append EOS so EOS gets SDPO gradients
             if self.tokenizer.eos_token is not None:
                 text = text + self.tokenizer.eos_token
 
@@ -116,10 +115,9 @@ class OfflineLRASCollator:
 
 
 
-class OfflineLRASTrainer(Trainer):
+class OfflineSDPOTrainer(Trainer):
     def __init__(
-        self, 
-        signal_clip: float = 2,
+        self,
         ignore_first_k: int = 0,
         ref_model: Optional[torch.nn.Module] = None,
         kl_beta: float = 0.0,
@@ -128,17 +126,18 @@ class OfflineLRASTrainer(Trainer):
         kl_temperature: float = 1.0,
         kl_top_p: float = 1.0,
         kl_once_per_optimizer_step: bool = True,
-        *args, 
+        *args,
         **kwargs
     ):
-        self.signal_clip = signal_clip
         self.ignore_first_k = ignore_first_k
-        
+
         self._metrics_buffer = defaultdict(list)
 
-        self._example_counter = 0 
+        self._example_counter = 0
 
-        # KL config: not used
+        # KL regularization: not used in the paper (kl_beta=0.0, ref_model=None).
+        # The full KL penalty machinery is still supported — set kl_beta > 0 and
+        # pass a ref_model to enable it.
         self.ref_model = ref_model
         self.kl_beta = kl_beta
         self.kl_max_new_tokens = kl_max_new_tokens
@@ -190,67 +189,6 @@ class OfflineLRASTrainer(Trainer):
         completion_ids = seq[:, input_len:]
         return completion_ids
 
-
-    def _rollout_kl_penalty(self, model, prompt_texts: List[str]) -> torch.Tensor:
-        """
-        Computes mean per-sequence KL(pi_theta || pi_ref) on on-policy rollouts.
-        Returns scalar tensor (requires grad).
-        """
-        if self.ref_model is None or self.kl_beta == 0.0:
-            return torch.zeros([], device=model.device, dtype=torch.float32)
-
-        # ensure ref model on same device (do this once; cheap check)
-        if next(self.ref_model.parameters()).device != model.device:
-            self.ref_model.to(model.device)
-
-        # rollout y ~ pi_theta(.|x) (no grad)
-        completion_ids = self._rollout_from_policy(model, prompt_texts)  # (B, Tgen)
-
-        # log pi_theta(y|x) with grad
-        logps_pol, _, y_mask = self._token_logps_of_given_y(
-            context_texts=prompt_texts,
-            completion_ids_list=completion_ids,
-            model=model,
-        )
-
-        # log rollout preview + length (uses y_mask)
-        with torch.no_grad():
-            self._maybe_log_kl_rollout_preview(
-                prompt_texts=prompt_texts,
-                completion_ids=completion_ids,
-                y_mask=y_mask,
-                max_preview_tokens=150,
-                every_n_steps=5,
-            )
-        
-        # log pi_ref(y|x) no grad
-        with torch.no_grad():
-            logps_ref, _, _ = self._token_logps_of_given_y(
-                context_texts=prompt_texts,
-                completion_ids_list=completion_ids,
-                model=self.ref_model,
-            )
-
-        y_mask_f = y_mask.float()
-        lengths = y_mask_f.sum(dim=1).clamp(min=1.0)
-
-        # delta is the per-token advantage 
-        delta = (logps_pol - logps_ref).detach()
-
-        # reverse-KL surrogate
-        kl_sur = ((delta + 1.0) * logps_pol * y_mask_f).sum(dim=1) / lengths
-        kl_tok_mean = kl_sur.mean()
-
-        # logging
-        with torch.no_grad():
-            per_token_kl_val = (logps_pol.detach() - logps_ref) * y_mask_f
-            kl_seq_val = per_token_kl_val.sum(dim=1)
-            kl_tok_val = kl_seq_val / lengths
-            self._metrics_buffer["kl/rollout_tok_mean"].append(float(kl_tok_val.mean()))
-            self._metrics_buffer["kl/rollout_seq_mean"].append(float(kl_seq_val.mean()))
-            self._metrics_buffer["kl/rollout_len_mean"].append(float(lengths.mean()))
-
-        return kl_tok_mean
         
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         """
@@ -281,11 +219,7 @@ class OfflineLRASTrainer(Trainer):
         total_active_tokens = token_mask_f.sum() 
 
 
-        c = float(self.signal_clip)
-
-        per_token_diff = (logps_xo - logps_x).detach() 
-
-        per_token_diff = per_token_diff.clamp(min=-c, max=c)
+        per_token_diff = (logps_xo - logps_x).detach()
 
         per_token_loss = -(per_token_diff * logps_x) * token_mask_f          # (B, C')
 
@@ -334,42 +268,42 @@ class OfflineLRASTrainer(Trainer):
 
         if model.training:
             with torch.no_grad():
-                self._metrics_buffer["lras/signal_mean"].append(
+                self._metrics_buffer["sdpo/signal_mean"].append(
                     (per_token_diff * token_mask_f).sum().item() / total_active_tokens.item()
                 )
                 seq_logratio = (per_token_diff * token_mask_f).sum(dim=1)        # (B,)
                 length_norm_signal = seq_logratio / token_lengths.squeeze(1)     # (B,)
-                self._metrics_buffer["lras/len_signal_mean"].append(
+                self._metrics_buffer["sdpo/len_signal_mean"].append(
                     length_norm_signal.mean().item()
                 )
-                self._metrics_buffer["lras/base_loss"].append(base_loss.detach().float().item())
+                self._metrics_buffer["sdpo/base_loss"].append(base_loss.detach().float().item())
 
-                self._metrics_buffer["lras/signal_std"].append(
+                self._metrics_buffer["sdpo/signal_std"].append(
                     per_token_diff[token_mask.bool()].std().item()
                 )
-                self._metrics_buffer["lras/policy_logp"].append(
+                self._metrics_buffer["sdpo/policy_logp"].append(
                     (logps_x * token_mask_f).sum().item() / total_active_tokens.item()
                 )
-                self._metrics_buffer["lras/critic_logp"].append(
+                self._metrics_buffer["sdpo/critic_logp"].append(
                     (logps_xo * token_mask_f).sum().item() / total_active_tokens.item()
                 )
                 if kl_mean is not None:
-                    self._metrics_buffer["lras/kl_mean"].append(kl_mean.detach().float().item())
-                    self._metrics_buffer["lras/kl_term"].append((self.kl_beta * kl_mean).detach().float().item())
+                    self._metrics_buffer["sdpo/kl_mean"].append(kl_mean.detach().float().item())
+                    self._metrics_buffer["sdpo/kl_term"].append((self.kl_beta * kl_mean).detach().float().item())
                     
-                # self._metrics_buffer["lras/loss"].append(loss.item())
+                # self._metrics_buffer["sdpo/loss"].append(loss.item())
                 if eos_mask.any():
                     eos_signal = per_token_diff[eos_mask]
                     eos_logp_x = logps_x[eos_mask]
                     eos_logp_xo = logps_xo[eos_mask]
 
-                    self._metrics_buffer["lras/eos_signal_mean"].append(
+                    self._metrics_buffer["sdpo/eos_signal_mean"].append(
                         eos_signal.mean().item()
                     )
-                    self._metrics_buffer["lras/eos_logp_mean"].append(
+                    self._metrics_buffer["sdpo/eos_logp_mean"].append(
                         eos_logp_x.mean().item()
                     )
-                    self._metrics_buffer["lras/eos_logratio_mean"].append(
+                    self._metrics_buffer["sdpo/eos_logratio_mean"].append(
                         (eos_logp_xo - eos_logp_x).mean().item()
                     )
 
@@ -515,9 +449,9 @@ class OfflineLRASTrainer(Trainer):
             MAX_CHARS = 2000
             if len(xo_disp) > MAX_CHARS:
                 xo_disp = xo_disp[:MAX_CHARS] + "… [truncated]"
-            print(f"[LRAS DEBUG] xo_text:\n{xo_disp}\n")
+            print(f"[SDPO DEBUG] xo_text:\n{xo_disp}\n")
 
-            print(f"\n[LRAS DEBUG] Example #{g_idx} (after ignore_first_k) token-wise logps:")
+            print(f"\n[SDPO DEBUG] Example #{g_idx} (after ignore_first_k) token-wise logps:")
             header = f"{'idx':>4} | {'tok_id':>7} | {'tok_str':<15} | {'logp_x':>10} | {'logp_xo':>10} | {'log_ratio':>10}"
             print(header)
             print("-" * len(header))
@@ -534,6 +468,68 @@ class OfflineLRASTrainer(Trainer):
 
             print("") 
 
+
+    
+    def _rollout_kl_penalty(self, model, prompt_texts: List[str]) -> torch.Tensor:
+        """
+        Computes mean per-sequence KL(pi_theta || pi_ref) on on-policy rollouts.
+        Returns scalar tensor (requires grad).
+        """
+        if self.ref_model is None or self.kl_beta == 0.0:
+            return torch.zeros([], device=model.device, dtype=torch.float32)
+
+        # ensure ref model on same device (do this once; cheap check)
+        if next(self.ref_model.parameters()).device != model.device:
+            self.ref_model.to(model.device)
+
+        # rollout y ~ pi_theta(.|x) (no grad)
+        completion_ids = self._rollout_from_policy(model, prompt_texts)  # (B, Tgen)
+
+        # log pi_theta(y|x) with grad
+        logps_pol, _, y_mask = self._token_logps_of_given_y(
+            context_texts=prompt_texts,
+            completion_ids_list=completion_ids,
+            model=model,
+        )
+
+        # log rollout preview + length (uses y_mask)
+        with torch.no_grad():
+            self._maybe_log_kl_rollout_preview(
+                prompt_texts=prompt_texts,
+                completion_ids=completion_ids,
+                y_mask=y_mask,
+                max_preview_tokens=150,
+                every_n_steps=5,
+            )
+        
+        # log pi_ref(y|x) no grad
+        with torch.no_grad():
+            logps_ref, _, _ = self._token_logps_of_given_y(
+                context_texts=prompt_texts,
+                completion_ids_list=completion_ids,
+                model=self.ref_model,
+            )
+
+        y_mask_f = y_mask.float()
+        lengths = y_mask_f.sum(dim=1).clamp(min=1.0)
+
+        # delta is the per-token advantage 
+        delta = (logps_pol - logps_ref).detach()
+
+        # reverse-KL surrogate
+        kl_sur = ((delta + 1.0) * logps_pol * y_mask_f).sum(dim=1) / lengths
+        kl_tok_mean = kl_sur.mean()
+
+        # logging
+        with torch.no_grad():
+            per_token_kl_val = (logps_pol.detach() - logps_ref) * y_mask_f
+            kl_seq_val = per_token_kl_val.sum(dim=1)
+            kl_tok_val = kl_seq_val / lengths
+            self._metrics_buffer["kl/rollout_tok_mean"].append(float(kl_tok_val.mean()))
+            self._metrics_buffer["kl/rollout_seq_mean"].append(float(kl_seq_val.mean()))
+            self._metrics_buffer["kl/rollout_len_mean"].append(float(lengths.mean()))
+
+        return kl_tok_mean
 
     def _maybe_log_kl_rollout_preview(
         self,

@@ -53,10 +53,10 @@ SYSTEM_PROMPT="${SYSTEM_PROMPT:-tldr}"  # tldr|general (matches your python CLI)
 
 TRAIN_JSONL="${TRAIN_JSONL:-/path/to/tldr_data/train.jsonl}"
 VAL_JSONL="${VAL_JSONL:-/path/to/tldr_data/validation.jsonl}"
-TRAIN_N="${TRAIN_N:-512}"
+TRAIN_N="${TRAIN_N:-256}"
 EVAL_N="${EVAL_N:-256}"
 MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-512}"
-SEED="${SEED:-43}"
+SEED="${SEED:-42}"
 
 # =============================================================================
 # Output + caches (portable)
@@ -81,7 +81,6 @@ export WANDB_PROJECT="${WANDB_PROJECT:-tldr}"
 export WANDB_NAME="${WANDB_NAME:-sdpo-tldr-${STYLE}-lr${LR}-bs${BS}-ga${GA}-${RUN_ID}}"
 
 #   export HF_TOKEN=...
-#   export ANTHROPIC_API_KEY=...
 unset SSL_CERT_FILE SSL_CERT_DIR || true
 
 # =============================================================================

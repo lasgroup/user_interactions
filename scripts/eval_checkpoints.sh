@@ -1,20 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Evaluate multiple training checkpoints for the HelpSteer2 (general prompts) experiment.
+# Compares each checkpoint against the base model using Claude Haiku as judge.
+# Requires: export ANTHROPIC_API_KEY=...
+#
 # Usage:
-#   ./scripts/eval_tldr_checkpoints.sh [--dry-run]
+#   RUN_DIR=/path/to/sdpo-runs/run-id \
+#   DATA_PATH=/path/to/helpsteer_data/validation.jsonl \
+#   ./scripts/eval_checkpoints.sh [--dry-run]
 #
-# Required env (typical):
-#   export RUN_DIR="/path/to/your/run"      # contains checkpoint-*
-#   export DATA_PATH="/path/to/validation.jsonl"
-#
-# Optional:
-#   CKPTS="3 5 8 12 15" BASELINE="Qwen/Qwen3-4B" STYLE="concise_casual_beginner" ./scripts/eval_tldr_checkpoints.sh
-#   WORLD_SIZE=4 ACCELERATE_CONFIG=./configs/accelerate_multigpu.yaml ./scripts/eval_tldr_checkpoints.sh
-#
-# Secrets:
-#   export ANTHROPIC_API_KEY="..."   # if judge uses Claude
-#   export HF_TOKEN="..."            # if needed for gated models
+# Common overrides:
+#   CKPTS="3 6 9 12 15" STYLE="concise_casual_beginner" ./scripts/eval_checkpoints.sh
+#   BASELINE="Qwen/Qwen3-8B" JUDGE_MODEL="claude-haiku-4-5-20251001" ./scripts/eval_checkpoints.sh
+#   WORLD_SIZE=4 ACCELERATE_CONFIG=./multigpu_accelerate_config.yaml ./scripts/eval_checkpoints.sh
 
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -39,33 +38,32 @@ run() {
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 EVAL_SCRIPT="${EVAL_SCRIPT:-$REPO_ROOT/auxiliary/eval_style_pairwise_accelerate.py}"
 
-RUN_DIR="${RUN_DIR:-}"                     # REQUIRED (directory containing checkpoint-*)
-DATA_PATH="${DATA_PATH:-}"                 # REQUIRED (e.g., validation.jsonl)
+RUN_DIR="${RUN_DIR:-}"     # REQUIRED: directory containing checkpoint-* subdirs
+DATA_PATH="${DATA_PATH:-}" # REQUIRED: path to validation.jsonl
 
 if [[ -z "$RUN_DIR" ]]; then
-  echo "ERROR: RUN_DIR is required and must point to a directory containing checkpoint-*"
+  echo "ERROR: RUN_DIR is required and must point to a directory containing checkpoint-* subdirs"
   exit 1
 fi
 if [[ -z "$DATA_PATH" ]]; then
-  echo "ERROR: DATA_PATH is required (e.g., /path/to/validation.jsonl)"
+  echo "ERROR: DATA_PATH is required (e.g., /path/to/helpsteer_data/validation.jsonl)"
   exit 1
 fi
 
 # =============================================================================
-# Eval configuration (defaults match your script)
+# Eval configuration
 # =============================================================================
 STYLE="${STYLE:-concise_casual_beginner}"
+BASELINE="${BASELINE:-Qwen/Qwen3-8B}"
+JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"  # Claude Haiku judge
 
-BASELINE="${BASELINE:-Qwen/Qwen3-4B}"
-JUDGE_MODEL="${JUDGE_MODEL:-claude-haiku-4-5-20251001}"
+# Empty system prompt for the general prompts experiment
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"
 
-CKPTS="${CKPTS:-50 100 150 200 250}"     # list of checkpoint numbers
-SYSTEM_PROMPT="${SYSTEM_PROMPT:-}"       # keep empty unless needed
-
+CKPTS="${CKPTS:-3 6 9 12 15}"
 EVAL_N="${EVAL_N:-256}"
 SEED="${SEED:-42}"
 MAX_PROMPT_TOKENS_FILTER="${MAX_PROMPT_TOKENS_FILTER:-512}"
-
 MAX_INPUT_TOKENS="${MAX_INPUT_TOKENS:-2048}"
 MAX_NEW_TOKENS="${MAX_NEW_TOKENS:-1024}"
 BATCH_SIZE="${BATCH_SIZE:-4}"
@@ -78,10 +76,10 @@ WORLD_SIZE="${WORLD_SIZE:-4}"
 ACCELERATE_CONFIG="${ACCELERATE_CONFIG:-}"
 
 # =============================================================================
-# Output + caches (portable)
+# Output + caches
 # =============================================================================
 BASE_WORK="${BASE_WORK:-${SCRATCH:-${TMPDIR:-/tmp}}}"
-RUN_ID="${RUN_ID:-eval-$(date +%Y%m%d-%H%M%S)}"
+RUN_ID="${RUN_ID:-eval-helpsteer-$(date +%Y%m%d-%H%M%S)}"
 
 OUT_DIR="${OUT_DIR:-$BASE_WORK/sdpo-eval/$RUN_ID}"
 CACHE_DIR="${CACHE_DIR:-$BASE_WORK/sdpo-eval-cache/$RUN_ID}"
@@ -95,6 +93,7 @@ export TMPDIR="$CACHE_DIR/tmp"
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 
+#   export ANTHROPIC_API_KEY=...
 unset SSL_CERT_FILE SSL_CERT_DIR || true
 
 cd "$REPO_ROOT"
@@ -106,32 +105,31 @@ echo "CKPTS:      $CKPTS"
 echo "BASELINE:   $BASELINE"
 echo "JUDGE:      $JUDGE_MODEL"
 echo "OUT_DIR:    $OUT_DIR"
-echo "CACHE_DIR:  $CACHE_DIR"
 echo "WORLD_SIZE: $WORLD_SIZE"
 echo "---------------------------------------"
 
-declare -a SUMMARY_LINES=()
-
 launch_eval() {
-  local cmd="$1"
+  local args="$1"
   if [[ "${WORLD_SIZE}" -le 1 ]]; then
-    run "$cmd"
+    run "python $args"
   else
     if [[ -n "$ACCELERATE_CONFIG" ]]; then
-      run "accelerate launch --config_file \"$ACCELERATE_CONFIG\" $cmd"
+      run "accelerate launch --config_file \"$ACCELERATE_CONFIG\" $args"
     else
-      run "accelerate launch --num_processes \"$WORLD_SIZE\" $cmd"
+      run "accelerate launch --num_processes \"$WORLD_SIZE\" $args"
     fi
   fi
 }
 
+declare -a SUMMARY_LINES=()
+
 for CKPT in $CKPTS; do
   CANDIDATE="$RUN_DIR/checkpoint-$CKPT"
-  RUN_NAME="tldr_${STYLE}_base_vs_ckpt${CKPT}"
+  RUN_NAME="helpsteer_${STYLE}_base_vs_ckpt${CKPT}"
 
-  echo "[$(date '+%F %T')] Starting CKPT=$CKPT  CANDIDATE=$CANDIDATE  RUN_NAME=$RUN_NAME"
+  echo "[$(date '+%F %T')] Starting CKPT=$CKPT  CANDIDATE=$CANDIDATE"
 
-  CMD="python \"$EVAL_SCRIPT\" \
+  SCRIPT_ARGS="\"$EVAL_SCRIPT\" \
     --local_dataset_dir \"$DATA_PATH\" \
     --eval_split validation \
     --eval_n \"$EVAL_N\" \
@@ -149,7 +147,7 @@ for CKPT in $CKPTS; do
     --out_dir \"$OUT_DIR\" \
     --run_name \"$RUN_NAME\""
 
-  launch_eval "$CMD"
+  launch_eval "$SCRIPT_ARGS"
 
   echo "[$(date '+%F %T')] Finished CKPT=$CKPT"
 
@@ -185,10 +183,12 @@ done
 
 echo "[$(date '+%F %T')] All checkpoints done."
 echo ""
-echo "STYLE:      $STYLE"
-echo "================ TL;DR EVAL SUMMARY ================"
+echo "STYLE:    $STYLE"
+echo "BASELINE: $BASELINE"
+echo "JUDGE:    $JUDGE_MODEL"
+echo "================ HELPSTEER EVAL SUMMARY ================"
 echo -e "ckpt\twinrate\tse_analytic\tse_boot\tN_eff\twins_a\twins_b\tties\tcoverage"
 for L in "${SUMMARY_LINES[@]}"; do
   echo -e "$L"
 done
-echo "===================================================="
+echo "========================================================="

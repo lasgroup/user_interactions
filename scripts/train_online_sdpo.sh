@@ -39,18 +39,18 @@ WORLD_SIZE="${WORLD_SIZE:-4}"
 # =============================================================================
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-8B}"
 LR="${LR:-5e-6}"
-BS="${BS:-4}"
-GA="${GA:-1}"
-STYLE="${STYLE:-concise_casual_beginner}"
+BS="${BS:-2}"
+GA="${GA:-4}"
+STYLE="${STYLE:-no_emojis}"
 
-SYSTEM_PROMPT="${SYSTEM_PROMPT:-general}"  # tldr|general (matches your python CLI)
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-general}"  # tldr|general
 
 TRAIN_JSONL="${TRAIN_JSONL:-/path/to/train.jsonl}"
 VAL_JSONL="${VAL_JSONL:-/path/to/validation.jsonl}"
 TRAIN_N="${TRAIN_N:-512}"
 EVAL_N="${EVAL_N:-256}"
 MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-512}"
-SEED="${SEED:-43}"
+SEED="${SEED:-42}"
 
 # =============================================================================
 # Output + caches (portable)

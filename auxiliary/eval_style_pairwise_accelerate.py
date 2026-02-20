@@ -18,8 +18,8 @@ from accelerate import Accelerator
 from accelerate.utils import InitProcessGroupKwargs
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
-from style_judge import StyleJudge
-from claude_style_judge import ClaudeStyleJudge
+from auxiliary.style_judge import StyleJudge
+from auxiliary.claude_style_judge import ClaudeStyleJudge
 
 
 def parse_args():
@@ -393,41 +393,6 @@ def compute_metrics(
     }
 
 
-
-# def compute_metrics(decisions: List[int]) -> Dict[str, Any]:
-#     n = len(decisions)
-#     if n == 0:
-#         return {"n": 0, "coverage": 0.0}
-
-#     ties = sum(d == -1 for d in decisions)
-#     wins_a = sum(d == 0 for d in decisions)
-#     wins_b = sum(d == 1 for d in decisions)
-
-#     # Mapping to scores used in the benchmark's GLM: Win=1.0, Tie=0.5, Loss=0.0
-#     scores = [1.0 if d == 0 else (0.5 if d == -1 else 0.0) for d in decisions]
-
-#     # The 'Standard Win Rate' (as seen on leaderboards)
-#     standard_win_rate = np.mean(scores) * 100
-
-#     # Precision/Standard Error
-#     standard_error = (np.std(scores) / np.sqrt(n)) * 100
-
-#     denom = wins_a + wins_b
-#     winrate_a_no_ties = (wins_a / denom * 100) if denom > 0 else float("nan")
-#     coverage = (1.0 - ties / n)
-
-#     return {
-#         "n": n,
-#         "wins_a": wins_a,
-#         "wins_b": wins_b,
-#         "ties": ties,
-#         "coverage": coverage,
-#         "standard_win_rate": standard_win_rate,
-#         "standard_error": standard_error,
-#         "winrate_a_ignoring_ties": winrate_a_no_ties,
-#     }
-
-
 def main():
     args = parse_args()
 
@@ -507,7 +472,7 @@ def main():
     elif args.in_context_evaluation:
         # Claude judge always uses persona internally; for dataset persona injection,
         # just reuse STYLE_PERSONAS directly
-        from user_simulator import STYLE_PERSONAS
+        from auxiliary.user_simulator import STYLE_PERSONAS
         system_persona = STYLE_PERSONAS[args.style]
     else:
         system_persona = None

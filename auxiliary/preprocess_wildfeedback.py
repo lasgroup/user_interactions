@@ -1,5 +1,6 @@
 # wildfeedback_interactions_short_history.py
 
+import argparse
 from pathlib import Path
 from datasets import load_dataset
 import pandas as pd
@@ -137,6 +138,15 @@ for original_idx, row in enumerate(dataset):
 
         processed_data.append(entry)
 
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--out_dir", type=str, default=None,
+                   help="Directory to write output JSONL. Defaults to <repo_root>/data/wildfeedback")
+    return p.parse_args()
+
+
+cli = parse_args()
+
 df = pd.DataFrame(processed_data)
 
 print("\n=== Processing Statistics ===")
@@ -149,7 +159,10 @@ print(f"Conversations kept:              {stats['kept_conversations']}")
 print(f"Interaction pairs generated:     {len(df)}")
 print("================================\n")
 
-data_dir = (Path.cwd().parent / "data").resolve()
+if cli.out_dir is not None:
+    data_dir = Path(cli.out_dir).resolve()
+else:
+    data_dir = (Path(__file__).parent.parent / "data" / "wildfeedback").resolve()
 data_dir.mkdir(parents=True, exist_ok=True)
 
 output_path = data_dir / OUTPUT_FILENAME

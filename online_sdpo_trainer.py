@@ -16,7 +16,7 @@ from trl.trainer.base_trainer import BaseTrainer
 from trl.trainer.rloo_trainer import RLOOTrainer
 from trl.trainer.utils import nanmax, nanmin, pad
 
-from user_simulator import UserSimulator, StyleUserSimulator
+from auxiliary.user_simulator import UserSimulator, StyleUserSimulator
 
 
 class SDPOOnlineTrainer(RLOOTrainer):
@@ -637,11 +637,11 @@ class SDPOOnlineTrainer(RLOOTrainer):
         else:
             from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+            self.processing_class.padding_side = "left"
             generate_inputs = self.processing_class(
                 text=prompts_text,
                 return_tensors="pt",
                 padding=True,
-                padding_side="left",
                 max_length=self.max_prompt_length,
                 truncation=True,
                 add_special_tokens=False,
@@ -771,7 +771,7 @@ class SDPOOnlineTrainer(RLOOTrainer):
                 for tid in tok_ids
             ]
 
-            print(f"\n[SDPOUI DEBUG] step={step}", flush=True)
+            print(f"\n[SDPO DEBUG] step={step}", flush=True)
             print("Full Conditional Prompt:\n" + conditional_contexts, flush=True)
             print("Completion:\n" + completion, flush=True)
             print("User response:\n" + user_response, flush=True)

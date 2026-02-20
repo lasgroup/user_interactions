@@ -1,6 +1,7 @@
 # preprocess_wildchat.py
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -38,7 +39,7 @@ OUTPUT_FILENAME = "wildchat_interactions_v1.jsonl"
 # Extraction mode:
 # - "assistant_to_user": records where completion is assistant msg and user_response is the NEXT user msg (like your WildFeedback logic)
 # - "user_to_assistant": records where completion is assistant msg that answers a user msg; user_response is OPTIONAL next user msg
-PAIR_KIND = "assistant_to_user"  # keep this to match your LRAS setup
+PAIR_KIND = "assistant_to_user"  # keep this to match the SDPO data format
 
 
 def is_english(conversation_level_language: Optional[str]) -> bool:
@@ -114,14 +115,26 @@ def should_stop(kept_convs: int, interactions: int) -> bool:
     return False
 
 
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--out_dir", type=str, default=None,
+                   help="Directory to write output JSONL. Defaults to <repo_root>/data/wildchat")
+    return p.parse_args()
+
+
 def main() -> None:
+    cli = parse_args()
+
     print(f"Loading dataset {DATASET_NAME} [{SPLIT}] ...")
     ds = load_dataset(DATASET_NAME, split=SPLIT)
 
     # Reproducible sampling order
     ds = ds.shuffle(seed=SEED)
 
-    data_dir = (Path.cwd().parent / "data").resolve()
+    if cli.out_dir is not None:
+        data_dir = Path(cli.out_dir).resolve()
+    else:
+        data_dir = (Path(__file__).parent.parent / "data" / "wildchat").resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
     output_path = data_dir / OUTPUT_FILENAME
 

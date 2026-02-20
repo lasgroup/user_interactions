@@ -4,10 +4,10 @@ from dataclasses import dataclass
 import torch
 from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from sdpo_config import SDPOConfig
+from online_sdpo_config import SDPOConfig
 from online_sdpo_trainer import SDPOOnlineTrainer
-from user_simulator import StyleUserSimulator
-from claude_user_simulator import ClaudeStyleUserSimulator
+from auxiliary.user_simulator import StyleUserSimulator
+from auxiliary.claude_user_simulator import ClaudeStyleUserSimulator
 
 
 SYSTEM_PROMPT_TLDR = (
@@ -35,7 +35,7 @@ def parse_args():
     p.add_argument("--max_prompt_tokens", type=int, default=512)
     p.add_argument("--train_n", type=int, default=512)
     p.add_argument("--eval_n", type=int, default=256)
-    p.add_argument("--seed", type=int, default=43)
+    p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--user_model_name_or_path",
         type=str,
