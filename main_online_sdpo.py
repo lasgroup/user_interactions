@@ -1,20 +1,19 @@
 import os
 import argparse
 from dataclasses import dataclass
-from pathlib import Path
 import torch
-import wandb
 from datasets import load_dataset
-from transformers import AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from sdpo_config import SDPOConfig
-from online_trainer import SDPOOnlineTrainer
+from online_sdpo_trainer import SDPOOnlineTrainer
+from user_simulator import StyleUserSimulator
 from claude_user_simulator import ClaudeStyleUserSimulator
 
 
-SYSTEM_PROMPT_EXPERIMENT_1 = (
+SYSTEM_PROMPT_TLDR = (
     "Write summary of the text that is 1-2 sentences long. Always begin with 'TL;DR:' and output only the summary."
 )
-SYSTEM_PROMPT_EXPERIMENT_2 = ""
+SYSTEM_PROMPT_GENERAL = ""
 
 
 def parse_args():
@@ -27,25 +26,30 @@ def parse_args():
     p.add_argument(
         "--system_prompt",
         type=str,
-        default="exp2",
-        choices=["exp1", "exp2"],
+        default="general",
+        choices=["tldr", "general"],
         help="Choose which system prompt experiment to run.",
     )
-    p.add_argument("--train_jsonl", type=str, default="/users/tkleine/data/helpsteer/train.jsonl")
-    p.add_argument("--val_jsonl", type=str, default="/users/tkleine/data/helpsteer/validation.jsonl")
+    p.add_argument("--train_jsonl", type=str, required=True)
+    p.add_argument("--val_jsonl", type=str, required=True)
     p.add_argument("--max_prompt_tokens", type=int, default=512)
     p.add_argument("--train_n", type=int, default=512)
     p.add_argument("--eval_n", type=int, default=256)
     p.add_argument("--seed", type=int, default=43)
+    p.add_argument(
+        "--user_model_name_or_path",
+        type=str,
+        default=None,
+        help="If set, use a local StyleUserSimulator with this model. "
+             "If unset, ClaudeStyleUserSimulator is used (requires ANTHROPIC_API_KEY).",
+    )
     return p.parse_args()
 
 
 @dataclass
 class ScriptArgs:
     model_name_or_path: str = "Qwen/Qwen3-8B"
-    output_dir: str = os.getenv("OUTPUT_DIR", "/capstor/scratch/cscs/tkleine/tldr-sdpo/local")
-    job_id: str = os.getenv("SLURM_JOB_ID", "local")
-    local_dataset_dir: str = str((Path.home() / "data" / "tldr_prompts_unique").resolve())
+    output_dir: str = os.getenv("OUTPUT_DIR", "./output")
     dataset_train_split: str = "train"
     dataset_test_split: str = "validation"
 
@@ -66,10 +70,10 @@ def main():
     cli = parse_args()
     args = ScriptArgs(model_name_or_path=cli.model_name_or_path)
 
-    if cli.system_prompt == "exp1":
-        system_prompt = SYSTEM_PROMPT_EXPERIMENT_1
+    if cli.system_prompt == "tldr":
+        system_prompt = SYSTEM_PROMPT_TLDR
     else:
-        system_prompt = SYSTEM_PROMPT_EXPERIMENT_2
+        system_prompt = SYSTEM_PROMPT_GENERAL
 
     tok = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=True, padding_side="left")
     if tok.pad_token is None:
@@ -150,13 +154,30 @@ def main():
     training_args.style = cli.style
     training_args.system_prompt = system_prompt
 
-    _ = BitsAndBytesConfig(load_in_8bit=True)
-
-    user_model = ClaudeStyleUserSimulator(
-        style=training_args.style,
-        max_tokens=256,
-        temperature=0.0,
-    )
+    if cli.user_model_name_or_path is not None:
+        print(f"Loading local user simulator: {cli.user_model_name_or_path}")
+        user_hf = AutoModelForCausalLM.from_pretrained(
+            cli.user_model_name_or_path,
+            torch_dtype=torch.bfloat16,
+            device_map="auto",
+        )
+        user_hf.eval()
+        user_sim_tok = AutoTokenizer.from_pretrained(cli.user_model_name_or_path, use_fast=True)
+        if user_sim_tok.pad_token is None:
+            user_sim_tok.pad_token = user_sim_tok.eos_token
+        user_model = StyleUserSimulator(
+            model=user_hf,
+            tokenizer=user_sim_tok,
+            device=next(user_hf.parameters()).device,
+            style=cli.style,
+        )
+    else:
+        print("Using Claude user simulator (ClaudeStyleUserSimulator).")
+        user_model = ClaudeStyleUserSimulator(
+            style=training_args.style,
+            max_tokens=256,
+            temperature=0.0,
+        )
 
     trainer = SDPOOnlineTrainer(
         model=args.model_name_or_path,

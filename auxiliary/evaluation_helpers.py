@@ -165,6 +165,8 @@ def run_qualitative_evaluation(
         del inputs, new_gen_ids, ref_gen_ids
         torch.cuda.empty_cache()
     
+    df = pd.DataFrame(results)
+
     print("\n=== Average Completion Lengths ===")
     print(f"Dataset GPT: {df['GT_Len'].mean():.1f} tokens")
     print(f"Ref Model:   {df['Ref_Len'].mean():.1f} tokens")
@@ -173,7 +175,5 @@ def run_qualitative_evaluation(
     pd.set_option('display.max_columns', None)
     pd.set_option('display.width', 180)
     pd.set_option('display.max_colwidth', 30) # slightly wider text
-    
-    df = pd.DataFrame(results)
     
     print(df.to_markdown(index=False))

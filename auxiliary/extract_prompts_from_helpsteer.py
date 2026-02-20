@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import re
 from datasets import load_dataset
 
 DATASET_NAME = "nvidia/HelpSteer2"
-OUT_TRAIN = "train.jsonl"
-OUT_VAL = "validation.jsonl"
 
 MAX_PROMPT_CHARS = 2048
 MAX_RESPONSE_CHARS = 2048
@@ -83,8 +83,13 @@ def save_split(split_name: str, out_path: str) -> None:
 
 
 def main() -> None:
-    save_split("train", OUT_TRAIN)
-    save_split("validation", OUT_VAL)
+    p = argparse.ArgumentParser()
+    p.add_argument("--out_dir", type=str, default=".", help="Directory to write train.jsonl and validation.jsonl")
+    args = p.parse_args()
+
+    os.makedirs(args.out_dir, exist_ok=True)
+    save_split("train", os.path.join(args.out_dir, "train.jsonl"))
+    save_split("validation", os.path.join(args.out_dir, "validation.jsonl"))
 
 
 if __name__ == "__main__":

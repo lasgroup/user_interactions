@@ -187,7 +187,7 @@ class SDPOOnlineTrainer(RLOOTrainer):
             tok_logps_ref_local, _, _ = self._token_logps_of_given_y(
                 context_texts=x_contexts,
                 completion_ids_list=completion_ids_list,
-                ignore_first_k=4,
+                ignore_first_k=0,
                 model=self.ref_model,
             )
         else:

@@ -1,3 +1,4 @@
+# Offline SDPO from User Interactions
 import os
 import torch
 from datasets import load_dataset
@@ -9,7 +10,7 @@ from transformers import (
 )
 import wandb
 from pathlib import Path
-from lras_offline_trainer import OfflineLRASCollator, OfflineLRASTrainer
+from offline_trainer import OfflineLRASCollator, OfflineLRASTrainer
 import argparse 
 
 def parse_args():

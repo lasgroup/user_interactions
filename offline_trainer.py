@@ -1,4 +1,3 @@
-# lras_offline_trainer.py
 import torch
 import copy
 from dataclasses import dataclass
