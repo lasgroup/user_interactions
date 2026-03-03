@@ -8,5 +8,8 @@ peft
 bitsandbytes
 wandb
 
+# Live chat interface
+gradio>=4.0
+
 # User simulator / judge (Claude)
 anthropic
