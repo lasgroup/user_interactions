@@ -109,6 +109,18 @@ class LiveSDPOUpdater:
     #  Generation (inference mode)
     # ------------------------------------------------------------------ #
 
+    def _enter_inference_mode(self):
+        """Disable gradient checkpointing so KV-cache is used during generation."""
+        self.model.eval()
+        self.model.gradient_checkpointing_disable()
+
+    def _enter_training_mode(self):
+        """Re-enable gradient checkpointing for memory-efficient backward pass."""
+        self.model.train()
+        self.model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
+
     def generate_response(self, messages: List[Dict[str, str]]) -> str:
         """Generate an assistant response given the conversation so far."""
         prompt_text = self.tokenizer.apply_chat_template(
@@ -118,7 +130,7 @@ class LiveSDPOUpdater:
             enable_thinking=False,
         )
 
-        self.model.eval()
+        self._enter_inference_mode()
         enc = self.tokenizer(
             prompt_text,
             return_tensors="pt",
@@ -143,7 +155,7 @@ class LiveSDPOUpdater:
             enable_thinking=False,
         )
 
-        self.model.eval()
+        self._enter_inference_mode()
         enc = self.tokenizer(
             prompt_text,
             return_tensors="pt",
@@ -286,7 +298,7 @@ class LiveSDPOUpdater:
         user_follow_up
             The user's follow-up "o" (hindsight signal).
         """
-        self.model.train()
+        self._enter_training_mode()
 
         # ---- tokenize the completion ----
         completion_text = assistant_response.rstrip()
@@ -346,7 +358,7 @@ class LiveSDPOUpdater:
         ):
             self.save_checkpoint()
 
-        self.model.eval()
+        self._enter_inference_mode()
         return metrics
 
     # ------------------------------------------------------------------ #
