@@ -188,12 +188,14 @@ def main():
     parser.add_argument("--model", type=str, default="Qwen/Qwen3-8B")
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--lora_r", type=int, default=64)
-    parser.add_argument("--signal_clip", type=float, default=2.0)
+    parser.add_argument("--signal_clip", type=float, default=0.0,
+                        help="Clip signal magnitude (0 = no clipping)")
     parser.add_argument("--port", type=int, default=7860)
     parser.add_argument("--share", action="store_true")
     parser.add_argument("--checkpoint_dir", type=str, default="./live_checkpoints")
     parser.add_argument("--checkpoint_every", type=int, default=10)
-    parser.add_argument("--no_lora", action="store_true")
+    parser.add_argument("--use_lora", action="store_true",
+                        help="Enable LoRA (default: full fine-tuning)")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -208,7 +210,7 @@ def main():
         share=args.share,
         checkpoint_dir=args.checkpoint_dir,
         checkpoint_every_n_steps=args.checkpoint_every,
-        use_lora=not args.no_lora,
+        use_lora=args.use_lora,
         log_to_wandb=args.wandb,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,

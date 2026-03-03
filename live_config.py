@@ -9,8 +9,8 @@ class LiveSDPOConfig:
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
 
-    # ── LoRA (set use_lora=False for full fine-tuning) ──
-    use_lora: bool = True
+    # ── LoRA (set use_lora=True to enable) ──
+    use_lora: bool = False
     lora_r: int = 64
     lora_alpha: int = 128
     lora_target_modules: list[str] = field(default_factory=lambda: [
@@ -20,13 +20,13 @@ class LiveSDPOConfig:
     lora_dropout: float = 0.0
 
     # ── SDPO signal ──
-    signal_clip: float = 2.0
-    ignore_first_k: int = 2
+    signal_clip: float = 0.0  # 0 = no clipping
+    ignore_first_k: int = 0
     loss_mode: str = "simple_signal"  # "simple_signal" | "full_distillation"
 
     # ── Optimizer ──
     learning_rate: float = 1e-5
-    optimizer: str = "adamw_8bit"  # "adamw_8bit" | "adamw"
+    optimizer: str = "adamw"  # "adamw" | "adamw_8bit"
     max_grad_norm: float = 1.0
     weight_decay: float = 0.0
 

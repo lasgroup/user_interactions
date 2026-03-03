@@ -372,9 +372,12 @@ class LiveSDPOUpdater:
 
         mask_f = mask_x.float()
         length = mask_f.sum(dim=1, keepdim=True).clamp(min=1.0)
-        c = self.config.signal_clip
 
-        per_token_diff = (logps_xo - logps_x).detach().clamp(-c, c)
+        per_token_diff = (logps_xo - logps_x).detach()
+        if self.config.signal_clip > 0:
+            per_token_diff = per_token_diff.clamp(
+                -self.config.signal_clip, self.config.signal_clip,
+            )
         per_token_loss = -(per_token_diff * logps_x) * mask_f
         loss = (per_token_loss.sum(dim=1, keepdim=True) / length).mean()
 
@@ -420,9 +423,12 @@ class LiveSDPOUpdater:
         # For now, fall back to simple signal.
         mask_f = mask_x.float()
         length = mask_f.sum(dim=1, keepdim=True).clamp(min=1.0)
-        c = self.config.signal_clip
 
-        per_token_diff = (logps_xo - logps_x).detach().clamp(-c, c)
+        per_token_diff = (logps_xo - logps_x).detach()
+        if self.config.signal_clip > 0:
+            per_token_diff = per_token_diff.clamp(
+                -self.config.signal_clip, self.config.signal_clip,
+            )
         per_token_loss = -(per_token_diff * logps_x) * mask_f
         loss = (per_token_loss.sum(dim=1, keepdim=True) / length).mean()
 
