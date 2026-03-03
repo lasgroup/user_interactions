@@ -216,13 +216,15 @@ def main():
         temperature=args.temperature,
     )
 
-    print(f"[LIVE SDPO] Model:     {config.model_name_or_path}")
-    print(f"[LIVE SDPO] LoRA:      {config.use_lora}  (r={config.lora_r})")
-    print(f"[LIVE SDPO] LR:        {config.learning_rate}")
-    print(f"[LIVE SDPO] Signal clip: {config.signal_clip}")
-    print(f"[LIVE SDPO] Loss mode: {config.loss_mode}")
+    print(f"[LIVE SDPO] Model:     {config.model_name_or_path}", flush=True)
+    print(f"[LIVE SDPO] LoRA:      {config.use_lora}  (r={config.lora_r})", flush=True)
+    print(f"[LIVE SDPO] LR:        {config.learning_rate}", flush=True)
+    print(f"[LIVE SDPO] Signal clip: {config.signal_clip}", flush=True)
+    print(f"[LIVE SDPO] Loss mode: {config.loss_mode}", flush=True)
 
+    print("[LIVE SDPO] Building Gradio app...", flush=True)
     app = build_app(config)
+    print("[LIVE SDPO] Launching Gradio (share={})...".format(config.share), flush=True)
     app.launch(server_port=config.server_port, share=config.share)
 
 

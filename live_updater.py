@@ -29,9 +29,13 @@ class LiveSDPOUpdater:
         self.step = 0
         self.metrics_history: List[Dict] = []
 
+        print("[LIVE SDPO] Loading model and tokenizer...", flush=True)
         self._load_model_and_tokenizer()
+        print("[LIVE SDPO] Setting up optimizer...", flush=True)
         self._setup_optimizer()
+        print("[LIVE SDPO] Setting up generation config...", flush=True)
         self._setup_generation_config()
+        print("[LIVE SDPO] Updater ready.", flush=True)
 
     # ------------------------------------------------------------------ #
     #  Initialization

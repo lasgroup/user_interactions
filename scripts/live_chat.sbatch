@@ -1,13 +1,14 @@
 #!/bin/bash
-#SBATCH --job-name=live-sdpo
+#SBATCH --job-name=sdpo
 #SBATCH --account=infra01
+#SBATCH --reservation=PA-2338-RL
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120000
-#SBATCH --time=04:00:00
+#SBATCH --time=01:00:00
 #SBATCH --output=/users/%u/output/sdpo/%j.log
 #SBATCH --error=/users/%u/output/sdpo/%j.err
 #SBATCH --environment=sample-efficient-rlvr
@@ -20,6 +21,7 @@ unset SSL_CERT_FILE SSL_CERT_DIR
 
 REPO_ROOT="${REPO_ROOT:-$HOME/user_interactions}"
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+export PYTHONUNBUFFERED=1
 
 # Ensure output dir exists
 mkdir -p "$HOME/output/sdpo"
