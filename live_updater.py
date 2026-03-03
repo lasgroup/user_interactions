@@ -49,7 +49,7 @@ class LiveSDPOUpdater:
 
         self.model = AutoModelForCausalLM.from_pretrained(
             self.config.model_name_or_path,
-            torch_dtype=dtype,
+            dtype=dtype,
             attn_implementation=self.config.attn_implementation,
             device_map="auto",
         )
@@ -68,7 +68,11 @@ class LiveSDPOUpdater:
             self.model = get_peft_model(self.model, lora_cfg)
             self.model.print_trainable_parameters()
 
-        self.model.gradient_checkpointing_enable()
+        # use_reentrant=False is required for LoRA — frozen embeddings
+        # don't carry requires_grad, which breaks reentrant checkpointing.
+        self.model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False},
+        )
         self.device = next(self.model.parameters()).device
 
     def _setup_optimizer(self):
