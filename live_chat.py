@@ -41,19 +41,26 @@ class LiveChatSession:
         if not user_text.strip():
             return chat_history, "Idle", "", self.updater.step
 
+        async_training = self.config.async_training
         metrics_text = ""
 
         # ── Training step (if this is a follow-up) ──
         if self._pending_training_context is not None:
-            t0 = time.time()
             ctx = self._pending_training_context
-            metrics = self.updater.train_step(
-                messages_before_response=ctx["messages_before_response"],
-                assistant_response=ctx["assistant_response"],
-                user_follow_up=user_text,
-            )
-            metrics["train_time_s"] = round(time.time() - t0, 2)
-            metrics_text = self._format_metrics(metrics)
+
+            if async_training:
+                # Collect metrics from the *previous* async step (if any)
+                prev_metrics = self.updater.wait_for_training()
+                if prev_metrics is not None:
+                    metrics_text = self._format_metrics(prev_metrics)
+            else:
+                # Synchronous: train now, block until done
+                metrics = self.updater.train_step(
+                    messages_before_response=ctx["messages_before_response"],
+                    assistant_response=ctx["assistant_response"],
+                    user_follow_up=user_text,
+                )
+                metrics_text = self._format_metrics(metrics)
 
         # ── Add user message ──
         self.messages.append({"role": "user", "content": user_text})
@@ -64,6 +71,10 @@ class LiveChatSession:
         messages_before_response = copy.deepcopy(self.messages)
 
         # ── Generate assistant response ──
+        if async_training:
+            # Ensure no training is running before we use the model for inference
+            self.updater.wait_for_training()
+
         t0 = time.time()
         response_text = self.updater.generate_response(self.messages)
         gen_time = round(time.time() - t0, 2)
@@ -78,10 +89,26 @@ class LiveChatSession:
             "assistant_response": response_text,
         }
 
+        # ── Launch async training (runs in background after response is shown) ──
+        if async_training and self._pending_training_context is not None:
+            ctx = self._pending_training_context
+            self.updater.train_step_async(
+                messages_before_response=ctx["messages_before_response"],
+                assistant_response=ctx["assistant_response"],
+                user_follow_up=user_text,
+            )
+
+        # ── Build final metrics text with timing info ──
+        timing = f"  gen_time_s: {gen_time}"
+        if metrics_text:
+            metrics_text += f"\n{timing}"
+        else:
+            metrics_text = f"No training step (first message)\n{timing}"
+
         return (
             chat_history,
             "Idle",
-            metrics_text or "No training step (first message)",
+            metrics_text,
             self.updater.step,
         )
 
@@ -202,6 +229,8 @@ def main():
     parser.add_argument("--checkpoint_every", type=int, default=10)
     parser.add_argument("--use_lora", action="store_true",
                         help="Enable LoRA (default: full fine-tuning)")
+    parser.add_argument("--async_training", action="store_true",
+                        help="Train in background after generation (faster responses)")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -217,6 +246,7 @@ def main():
         checkpoint_dir=args.checkpoint_dir,
         checkpoint_every_n_steps=args.checkpoint_every,
         use_lora=args.use_lora,
+        async_training=args.async_training,
         log_to_wandb=args.wandb,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
@@ -227,6 +257,7 @@ def main():
     print(f"[LIVE SDPO] LR:        {config.learning_rate}", flush=True)
     print(f"[LIVE SDPO] Signal clip: {config.signal_clip}", flush=True)
     print(f"[LIVE SDPO] Loss mode: {config.loss_mode}", flush=True)
+    print(f"[LIVE SDPO] Async:     {config.async_training}", flush=True)
 
     print("[LIVE SDPO] Building Gradio app...", flush=True)
     app = build_app(config)

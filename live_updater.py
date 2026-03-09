@@ -8,6 +8,8 @@ import copy
 import os
 import shutil
 import threading
+import time
+import traceback
 from typing import Dict, List, Optional, Tuple
 
 import torch
@@ -28,6 +30,12 @@ class LiveSDPOUpdater:
         self.config = config
         self.step = 0
         self.metrics_history: List[Dict] = []
+
+        # Async training state
+        self._train_thread: Optional[threading.Thread] = None
+        self._train_lock = threading.Lock()
+        self._last_async_metrics: Optional[Dict] = None
+        self._async_error: Optional[str] = None
 
         print("[LIVE SDPO] Loading model and tokenizer...", flush=True)
         self._load_model_and_tokenizer()
@@ -288,6 +296,7 @@ class LiveSDPOUpdater:
             The user's follow-up "o" (hindsight signal).
         """
         self._enter_training_mode()
+        t0 = time.time()
 
         # ---- tokenize the completion ----
         completion_text = assistant_response.rstrip()
@@ -338,6 +347,7 @@ class LiveSDPOUpdater:
         metrics["step"] = self.step
         metrics["grad_norm"] = grad_norm.item()
         metrics["loss"] = loss.item()
+        metrics["train_time_s"] = round(time.time() - t0, 2)
         self.metrics_history.append(metrics)
 
         # ---- auto-checkpoint ----
@@ -349,6 +359,48 @@ class LiveSDPOUpdater:
 
         self._enter_inference_mode()
         return metrics
+
+    # ------------------------------------------------------------------ #
+    #  Async training
+    # ------------------------------------------------------------------ #
+
+    def wait_for_training(self) -> Optional[Dict]:
+        """Block until any in-flight async training finishes. Returns metrics or None."""
+        if self._train_thread is not None:
+            self._train_thread.join()
+            self._train_thread = None
+        metrics = self._last_async_metrics
+        self._last_async_metrics = None
+        error = self._async_error
+        self._async_error = None
+        if error:
+            print(f"[LIVE SDPO] Async training error: {error}", flush=True)
+        return metrics
+
+    def train_step_async(
+        self,
+        messages_before_response: List[Dict[str, str]],
+        assistant_response: str,
+        user_follow_up: str,
+    ) -> None:
+        """Launch train_step in a background thread."""
+        # Ensure any previous async step is done before starting a new one
+        self.wait_for_training()
+
+        def _run():
+            try:
+                with self._train_lock:
+                    metrics = self.train_step(
+                        messages_before_response=messages_before_response,
+                        assistant_response=assistant_response,
+                        user_follow_up=user_follow_up,
+                    )
+                self._last_async_metrics = metrics
+            except Exception as e:
+                self._async_error = f"{e}\n{traceback.format_exc()}"
+
+        self._train_thread = threading.Thread(target=_run, daemon=True)
+        self._train_thread.start()
 
     # ------------------------------------------------------------------ #
     #  Loss functions

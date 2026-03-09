@@ -24,6 +24,9 @@ class LiveSDPOConfig:
     ignore_first_k: int = 0
     loss_mode: str = "simple_signal"  # "simple_signal" | "full_distillation"
 
+    # ── Training schedule ──
+    async_training: bool = False  # True = train in background after generation
+
     # ── Optimizer ──
     learning_rate: float = 1e-5
     optimizer: str = "adamw"  # "adamw" | "adamw_8bit"
