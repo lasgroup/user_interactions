@@ -68,7 +68,7 @@ STYLE_PERSONAS = {
         "USER PROFILE: You are playing the role of a user that specifically dislikes when the assistant responses include filler praise at the beginning (such as 'Good question.' or 'Perfect!') or fillers at the end (such as 'I hope this helps!' or 'Let me know if there is anything else I can help you with.')."
         "You strongly prefer when the assistant responses directly without unnecessary additions at the beginning or end."
     ),
-    "answer_direclty_reduce_formatting": (
+    "answer_directly_reduce_formatting": (
         "USER PROFILE: You are playing the role of a user who prefers concise responses and dislikes long lists and excessive markdown formatting (such as ** ** and ###). You prefer plain text that is short and gets to the point quickly."
     ),
     "no_first_person": (
@@ -81,10 +81,10 @@ STYLE_PERSONAS = {
         "USER PROFILE: You are playing the role of a user who dislikes when the assistant presents multiple options or alternatives. You prefer the assistant to commit to a single best answer."
     ),
     "writing_tics": (
-        "USER PROFILE: You are playing the role of a user who specifically dislikes when the assistant uses emojis (such as ✅,📌,🧠) when responding." # a sentence or emojis (such as ✅,📌,🧠) in its responses."
+        "USER PROFILE: You are playing the role of a user who specifically dislikes when the assistant uses emojis (such as ✅,📌,🧠) when responding."
     ),
     "writing_tics_v2": (
-        "USER PROFILE: You are playing the role of a user who specifically dislikes when the assistant uses emojis (such as ✅,📌,🧠) when responding. You don't mind other formatting, but you specifically dislike when the assistant uses emojis and icons." # a sentence or emojis (such as ✅,📌,🧠) in its responses."
+        "USER PROFILE: You are playing the role of a user who specifically dislikes when the assistant uses emojis (such as ✅,📌,🧠) when responding. You don't mind other formatting, but you specifically dislike when the assistant uses emojis and icons."
     ),
     "formatting": (
         "USER PROFILE: You are playing the role of a user who specifically dislikes long lists and bullet points. In particular, you dislike nested lists. You prefer plain paragraphs instead."
@@ -161,16 +161,17 @@ class StyleUserSimulator(UserSimulator):
         tok = self.tok
         if tok.pad_token is None:
             tok.add_special_tokens({"pad_token": "[PAD]"})
+            self.model.resize_token_embeddings(len(tok))
         eos_id = getattr(tok, "eos_token_id", None)
         pad_id = tok.pad_token_id or eos_id
 
         chats = []
         for raw_prompt, completion in zip(prompts, completions):
             user_msg = (
-                "You are responding from the pespective of a user that messaged an AI assistant with the following request:\n\n"
+                "You are responding from the perspective of a user that messaged an AI assistant with the following request:\n\n"
                 f"Request:\n{raw_prompt}\n\n"
                 f"The assistant responded to you with:\n{completion}\n\n"
-                "Based on the user profile described in the system message and nothing else, provide a brief response to the assistant whether you are happy with its response or not."
+                "Based on the user profile described in the system message and nothing else, provide a brief response to the assistant whether you are happy with its response or not. "
                 "Carefully read the assistant's response and be specific but short if you disliked something. Respond from the perspective of the user."
             )
             # user_msg = (
@@ -188,7 +189,6 @@ class StyleUserSimulator(UserSimulator):
                     {"role": "user", "content": user_msg},
                 ]
             )
-
 
         if getattr(tok, "apply_chat_template", None) is not None:
             inputs_text = [

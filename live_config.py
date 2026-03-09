@@ -46,10 +46,9 @@ class LiveSDPOConfig:
 
     # ── Hindsight prompt format (matches offline_trainer.py:64-70) ──
     hindsight_block_template: str = (
-        "\n\n[HINDSIGHT CONTEXT]\n"
-        "The following is a user response to your previous, insufficient attempt. "
-        "Improve your response to the user prompt.\n"
-        "Future User Message: {follow_up}"
+        "\n\n=== HINDSIGHT CONTEXT ===\n"
+        "[The following is a future user message. Use this to guide your answer to the user prompt.]\n"
+        "{follow_up}"
     )
 
     # ── Checkpointing ──
