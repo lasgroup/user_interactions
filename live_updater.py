@@ -37,6 +37,20 @@ class LiveSDPOUpdater:
         self._last_async_metrics: Optional[Dict] = None
         self._async_error: Optional[str] = None
 
+        # vLLM state
+        self.llm = None  # vLLM LLM instance (GPU 0)
+        self._latest_lora_path: Optional[str] = None
+        self._lora_request_id: int = 0
+
+        # Force LoRA + async when using vLLM
+        if config.use_vllm:
+            if not config.use_lora:
+                print("[LIVE SDPO] use_vllm=True forces use_lora=True", flush=True)
+                config.use_lora = True
+            if not config.async_training:
+                print("[LIVE SDPO] use_vllm=True forces async_training=True", flush=True)
+                config.async_training = True
+
         print("[LIVE SDPO] Loading model and tokenizer...", flush=True)
         self._load_model_and_tokenizer()
         print("[LIVE SDPO] Setting up optimizer...", flush=True)
@@ -59,11 +73,13 @@ class LiveSDPOUpdater:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        # Training model: GPU 1 when vLLM, else auto
+        device_map = {"": "cuda:1"} if self.config.use_vllm else "auto"
         self.model = AutoModelForCausalLM.from_pretrained(
             self.config.model_name_or_path,
             dtype=dtype,
             attn_implementation=self.config.attn_implementation,
-            device_map="auto",
+            device_map=device_map,
         )
 
         if self.config.use_lora:
@@ -82,17 +98,13 @@ class LiveSDPOUpdater:
 
         self.device = next(self.model.parameters()).device
 
+        # vLLM inference engine on GPU 0
+        if self.config.use_vllm:
+            self._init_vllm()
+
     def _setup_optimizer(self):
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
-        if self.config.optimizer == "adamw_8bit":
-            import bitsandbytes as bnb
-            self.optimizer = bnb.optim.AdamW8bit(
-                trainable_params,
-                lr=self.config.learning_rate,
-                weight_decay=self.config.weight_decay,
-            )
-        else:
-            self.optimizer = torch.optim.AdamW(
+        self.optimizer = torch.optim.AdamW(
                 trainable_params,
                 lr=self.config.learning_rate,
                 weight_decay=self.config.weight_decay,
@@ -109,6 +121,59 @@ class LiveSDPOUpdater:
         )
 
     # ------------------------------------------------------------------ #
+    #  vLLM initialization
+    # ------------------------------------------------------------------ #
+
+    def _init_vllm(self):
+        import os as _os
+        _os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"  # ensure both GPUs visible
+
+        from vllm import LLM
+        print("[LIVE SDPO] Initializing vLLM on GPU 0...", flush=True)
+        self.llm = LLM(
+            model=self.config.model_name_or_path,
+            tensor_parallel_size=1,
+            gpu_memory_utilization=self.config.vllm_gpu_memory_utilization,
+            enable_lora=True,
+            max_lora_rank=self.config.lora_r,
+            device="cuda:0",
+        )
+        print("[LIVE SDPO] vLLM ready.", flush=True)
+
+    def _generate_vllm(self, messages: List[Dict[str, str]]) -> str:
+        """Generate using vLLM engine on GPU 0."""
+        from vllm import SamplingParams
+        from vllm.lora.request import LoRARequest
+
+        prompt_text = self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
+
+        sampling_params = SamplingParams(
+            temperature=self.config.temperature,
+            top_p=self.config.top_p,
+            max_tokens=self.config.max_new_tokens,
+        )
+
+        lora_request = None
+        if self._latest_lora_path is not None:
+            lora_request = LoRARequest(
+                f"live_adapter_{self._lora_request_id}",
+                self._lora_request_id,
+                self._latest_lora_path,
+            )
+
+        outputs = self.llm.generate(
+            prompt_text,
+            sampling_params=sampling_params,
+            lora_request=lora_request,
+        )
+        return outputs[0].outputs[0].text
+
+    # ------------------------------------------------------------------ #
     #  Generation (inference mode)
     # ------------------------------------------------------------------ #
 
@@ -120,6 +185,9 @@ class LiveSDPOUpdater:
 
     def generate_response(self, messages: List[Dict[str, str]]) -> str:
         """Generate an assistant response given the conversation so far."""
+        if self.config.use_vllm:
+            return self._generate_vllm(messages)
+
         prompt_text = self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
@@ -350,6 +418,14 @@ class LiveSDPOUpdater:
         metrics["train_time_s"] = round(time.time() - t0, 2)
         self.metrics_history.append(metrics)
 
+        # ---- sync LoRA adapter for vLLM ----
+        if self.config.use_vllm:
+            adapter_path = os.path.join(self.config.checkpoint_dir, "_live_adapter")
+            os.makedirs(adapter_path, exist_ok=True)
+            self.model.save_pretrained(adapter_path)
+            self._latest_lora_path = adapter_path
+            self._lora_request_id += 1
+
         # ---- auto-checkpoint ----
         if (
             self.config.checkpoint_every_n_steps > 0
@@ -461,41 +537,75 @@ class LiveSDPOUpdater:
         completion_ids: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
-        Placeholder for full logit distillation (KL/JSD).
-        Falls back to simple signal until compute_self_distillation_loss
-        is integrated from verl.
+        Reverse KL top-k distillation: KL(student || teacher).
+
+        Student = pi(·|x), Teacher = pi(·|x,o).
+        Top-k indices are taken from the student (on-policy), and the
+        teacher is evaluated on those same indices.
         """
         # Teacher: pi(·|x,o) — no grad
         with torch.no_grad():
-            logps_xo, mask_xo, logits_xo = self._compute_token_logprobs(
+            _, _, logits_xo = self._compute_token_logprobs(
                 xo_text, completion_ids, need_grad=False, need_logits=True,
             )
 
         # Student: pi(·|x) — with grad
-        logps_x, mask_x, logits_x = self._compute_token_logprobs(
+        _, mask_x, logits_x = self._compute_token_logprobs(
             x_text, completion_ids, need_grad=True, need_logits=True,
         )
 
-        # TODO: integrate compute_self_distillation_loss from verl here.
-        # For now, fall back to simple signal.
         mask_f = mask_x.float()
-        length = mask_f.sum(dim=1, keepdim=True).clamp(min=1.0)
-
-        per_token_diff = (logps_xo - logps_x).detach()
-        if self.config.signal_clip > 0:
-            per_token_diff = per_token_diff.clamp(
-                -self.config.signal_clip, self.config.signal_clip,
-            )
-        per_token_loss = -(per_token_diff * logps_x) * mask_f
-        loss = (per_token_loss.sum(dim=1, keepdim=True) / length).mean()
-
         total_tokens = mask_f.sum().clamp(min=1.0)
+        K = self.config.distillation_topk
+
+        # Full log-softmax over vocab
+        student_log_probs = F.log_softmax(logits_x, dim=-1)   # (1, C', V)
+        with torch.no_grad():
+            teacher_log_probs = F.log_softmax(logits_xo, dim=-1)  # (1, C', V)
+
+        # Student's top-k indices (on-policy support)
+        student_topk, topk_idx = torch.topk(student_log_probs, k=K, dim=-1)  # (1, C', K)
+        teacher_topk = torch.gather(teacher_log_probs, dim=-1, index=topk_idx)  # (1, C', K)
+
+        # Tail handling
+        if self.config.distillation_add_tail:
+            student_topk = self._add_tail(student_topk)   # (1, C', K+1)
+            teacher_topk = self._add_tail(teacher_topk)   # (1, C', K+1)
+        else:
+            student_topk = self._renorm_topk(student_topk)
+            teacher_topk = self._renorm_topk(teacher_topk)
+
+        # Reverse KL: KL(student || teacher) = sum_x student(x) * (log student(x) - log teacher(x))
+        # PyTorch kl_div(input, target) = target * (log target - input) when log_target=True
+        # So KL(student || teacher) = kl_div(input=teacher, target=student, log_target=True)
+        kl_per_token_per_k = F.kl_div(
+            teacher_topk, student_topk, reduction="none", log_target=True,
+        )  # (1, C', K+1) or (1, C', K)
+        per_token_kl = kl_per_token_per_k.sum(dim=-1)  # (1, C')
+
+        # Masked mean over tokens
+        loss = (per_token_kl * mask_f).sum() / total_tokens
+
         metrics = {
-            "signal_mean": (per_token_diff * mask_f).sum().item() / total_tokens.item(),
+            "kl_mean": (per_token_kl.detach() * mask_f).sum().item() / total_tokens.item(),
             "completion_tokens": int(total_tokens.item()),
-            "loss_mode": "full_distillation_placeholder",
+            "loss_mode": "full_distillation",
         }
         return loss, metrics
+
+    @staticmethod
+    def _add_tail(log_probs: torch.Tensor) -> torch.Tensor:
+        """Append log-prob of the tail (1 - sum(top_k_probs)) as a K+1th entry."""
+        log_s = torch.logsumexp(log_probs, dim=-1, keepdim=True)
+        log_s = torch.clamp(log_s, max=-1e-7)
+        tail_log = torch.log(-torch.expm1(log_s))
+        return torch.cat([log_probs, tail_log], dim=-1)
+
+    @staticmethod
+    def _renorm_topk(log_probs: torch.Tensor) -> torch.Tensor:
+        """Renormalize top-k log-probs to form a valid distribution."""
+        logZ = torch.logsumexp(log_probs, dim=-1, keepdim=True)
+        return log_probs - logZ
 
     # ------------------------------------------------------------------ #
     #  Debug logging  (offline_trainer.py:466-536)

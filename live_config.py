@@ -22,10 +22,14 @@ class LiveSDPOConfig:
     # ── SDPO signal ──
     signal_clip: float = 0.0  # 0 = no clipping
     ignore_first_k: int = 0
-    loss_mode: str = "simple_signal"  # "simple_signal" | "full_distillation"
+    loss_mode: str = "full_distillation"  # "simple_signal" | "full_distillation"
+    distillation_topk: int = 50       # top-k logits for full_distillation
+    distillation_add_tail: bool = True  # True = add tail bucket, False = renormalize top-k
 
     # ── Training schedule ──
     async_training: bool = False  # True = train in background after generation
+    use_vllm: bool = False        # True = vLLM on GPU 0, training on GPU 1 (forces LoRA + async)
+    vllm_gpu_memory_utilization: float = 0.9
 
     # ── Optimizer ──
     learning_rate: float = 1e-5

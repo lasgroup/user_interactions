@@ -5,7 +5,7 @@
 #SBATCH --partition=normal
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=1
+#SBATCH --gpus-per-node=2
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=120000
 #SBATCH --time=01:00:00
@@ -36,4 +36,6 @@ python "$REPO_ROOT/live_chat.py" \
   --model "${MODEL:-Qwen/Qwen3-8B}" \
   --lr "${LR:-1e-5}" \
   --share \
+  --use_vllm \
+  --use_lora \
   "$@"

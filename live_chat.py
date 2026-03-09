@@ -23,6 +23,7 @@ class LiveChatSession:
         self.config = config
         self.updater = LiveSDPOUpdater(config)
         self.messages: List[Dict[str, str]] = []
+        self.max_history = 5
         self._pending_training_context: Optional[Dict] = None
 
     def handle_user_message(
@@ -71,8 +72,9 @@ class LiveChatSession:
         messages_before_response = copy.deepcopy(self.messages)
 
         # ── Generate assistant response ──
-        if async_training:
+        if async_training and not self.config.use_vllm:
             # Ensure no training is running before we use the model for inference
+            # (not needed with vLLM — generation and training are on separate GPUs)
             self.updater.wait_for_training()
 
         t0 = time.time()
@@ -81,6 +83,7 @@ class LiveChatSession:
         print(f"[LIVE SDPO] Generation took {gen_time}s", flush=True)
 
         self.messages.append({"role": "assistant", "content": response_text})
+        self.messages = self.messages[-self.max_history:]
         chat_history.append({"role": "assistant", "content": response_text})
 
         # Store for next training step
@@ -231,6 +234,8 @@ def main():
                         help="Enable LoRA (default: full fine-tuning)")
     parser.add_argument("--async_training", action="store_true",
                         help="Train in background after generation (faster responses)")
+    parser.add_argument("--use_vllm", action="store_true",
+                        help="Use vLLM on GPU 0 for generation (requires 2 GPUs, forces LoRA + async)")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--max_new_tokens", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=0.7)
@@ -247,6 +252,7 @@ def main():
         checkpoint_every_n_steps=args.checkpoint_every,
         use_lora=args.use_lora,
         async_training=args.async_training,
+        use_vllm=args.use_vllm,
         log_to_wandb=args.wandb,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
@@ -258,6 +264,7 @@ def main():
     print(f"[LIVE SDPO] Signal clip: {config.signal_clip}", flush=True)
     print(f"[LIVE SDPO] Loss mode: {config.loss_mode}", flush=True)
     print(f"[LIVE SDPO] Async:     {config.async_training}", flush=True)
+    print(f"[LIVE SDPO] vLLM:      {config.use_vllm}", flush=True)
 
     print("[LIVE SDPO] Building Gradio app...", flush=True)
     app = build_app(config)
