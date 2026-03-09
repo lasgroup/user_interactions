@@ -72,11 +72,6 @@ class LiveSDPOUpdater:
             self.model = get_peft_model(self.model, lora_cfg)
             self.model.print_trainable_parameters()
 
-        # use_reentrant=False is required for LoRA — frozen embeddings
-        # don't carry requires_grad, which breaks reentrant checkpointing.
-        self.model.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False},
-        )
         self.device = next(self.model.parameters()).device
 
     def _setup_optimizer(self):
@@ -110,16 +105,10 @@ class LiveSDPOUpdater:
     # ------------------------------------------------------------------ #
 
     def _enter_inference_mode(self):
-        """Disable gradient checkpointing so KV-cache is used during generation."""
         self.model.eval()
-        self.model.gradient_checkpointing_disable()
 
     def _enter_training_mode(self):
-        """Re-enable gradient checkpointing for memory-efficient backward pass."""
         self.model.train()
-        self.model.gradient_checkpointing_enable(
-            gradient_checkpointing_kwargs={"use_reentrant": False},
-        )
 
     def generate_response(self, messages: List[Dict[str, str]]) -> str:
         """Generate an assistant response given the conversation so far."""

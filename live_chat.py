@@ -7,6 +7,7 @@ Usage:
 """
 import argparse
 import copy
+import time
 from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
@@ -44,12 +45,14 @@ class LiveChatSession:
 
         # ── Training step (if this is a follow-up) ──
         if self._pending_training_context is not None:
+            t0 = time.time()
             ctx = self._pending_training_context
             metrics = self.updater.train_step(
                 messages_before_response=ctx["messages_before_response"],
                 assistant_response=ctx["assistant_response"],
                 user_follow_up=user_text,
             )
+            metrics["train_time_s"] = round(time.time() - t0, 2)
             metrics_text = self._format_metrics(metrics)
 
         # ── Add user message ──
@@ -61,7 +64,10 @@ class LiveChatSession:
         messages_before_response = copy.deepcopy(self.messages)
 
         # ── Generate assistant response ──
+        t0 = time.time()
         response_text = self.updater.generate_response(self.messages)
+        gen_time = round(time.time() - t0, 2)
+        print(f"[LIVE SDPO] Generation took {gen_time}s", flush=True)
 
         self.messages.append({"role": "assistant", "content": response_text})
         chat_history.append({"role": "assistant", "content": response_text})
