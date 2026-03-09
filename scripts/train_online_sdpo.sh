@@ -39,18 +39,18 @@ WORLD_SIZE="${WORLD_SIZE:-4}"
 # =============================================================================
 MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-8B}"
 LR="${LR:-5e-6}"
-BS="${BS:-4}"
-GA="${GA:-1}"
-STYLE="${STYLE:-concise_casual_beginner}"
+BS="${BS:-2}"
+GA="${GA:-4}"
+STYLE="${STYLE:-no_emojis}"
 
-SYSTEM_PROMPT="${SYSTEM_PROMPT:-exp2}"  # exp1|exp2 (matches your python CLI)
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-general}"  # tldr|general
 
 TRAIN_JSONL="${TRAIN_JSONL:-/path/to/train.jsonl}"
 VAL_JSONL="${VAL_JSONL:-/path/to/validation.jsonl}"
 TRAIN_N="${TRAIN_N:-512}"
 EVAL_N="${EVAL_N:-256}"
 MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-512}"
-SEED="${SEED:-43}"
+SEED="${SEED:-42}"
 
 # =============================================================================
 # Output + caches (portable)
@@ -83,7 +83,7 @@ unset SSL_CERT_FILE SSL_CERT_DIR || true
 # =============================================================================
 cd "$REPO_ROOT"
 
-PY_CMD="python \"$TRAIN_SCRIPT\" \
+SCRIPT_ARGS="\"$TRAIN_SCRIPT\" \
   --learning_rate \"$LR\" \
   --per_device_train_batch_size \"$BS\" \
   --gradient_accumulation_steps \"$GA\" \
@@ -107,11 +107,11 @@ echo "VAL_JSONL=$VAL_JSONL"
 echo
 
 if [[ "${WORLD_SIZE}" -le 1 ]]; then
-  run "$PY_CMD"
+  run "python $SCRIPT_ARGS"
 else
   if [[ -n "$ACCELERATE_CONFIG" ]]; then
-    run "accelerate launch --config_file \"$ACCELERATE_CONFIG\" $PY_CMD"
+    run "accelerate launch --config_file \"$ACCELERATE_CONFIG\" $SCRIPT_ARGS"
   else
-    run "accelerate launch --num_processes \"$WORLD_SIZE\" $PY_CMD"
+    run "accelerate launch --num_processes \"$WORLD_SIZE\" $SCRIPT_ARGS"
   fi
 fi

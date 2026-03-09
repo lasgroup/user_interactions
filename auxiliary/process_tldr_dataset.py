@@ -1,3 +1,5 @@
+import argparse
+import json
 from pathlib import Path
 import hashlib
 from datasets import load_dataset, DatasetDict, Features, Value, concatenate_datasets
@@ -5,10 +7,9 @@ from datasets import load_dataset, DatasetDict, Features, Value, concatenate_dat
 # --- Config ---
 ADD_TLDR_SUFFIX = True
 N_EXAMPLES_TO_PRINT = 5
-TARGET_SUBDIR = "tldr_prompts_unique"
 NORMALIZE_FOR_DEDUP = True     # whitespace + lowercase
 CROSS_SPLIT_DEDUP = True       # ensure val has no items that appear in train
-MAX_PROMPT_LEN = 1024          
+MAX_PROMPT_LEN = 1024
 
 def norm_text(s: str) -> str:
     s = s.strip()
@@ -19,6 +20,12 @@ def norm_text(s: str) -> str:
 
 def make_key(prompt: str) -> str:
     return hashlib.sha1(norm_text(prompt).encode("utf-8")).hexdigest()
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--out_dir", type=str, default=None,
+                   help="Directory to write the dataset. Defaults to <repo_root>/data/tldr_prompts_unique")
+    return p.parse_args()
 
 # --- Load ---
 ds = load_dataset("openai/summarize_from_feedback", "comparisons")  # train/validation
@@ -107,8 +114,13 @@ for i in range(k):
     ex = prompt_ds["train"][i]["prompt"]
     print(f"\n=== Example {i+1}/{k} ===\n{ex[:1600]}")
 
+cli = parse_args()
+
 # Save to disk + JSONL export
-target_dir = (Path.cwd().parent / "data" / TARGET_SUBDIR).resolve()
+if cli.out_dir is not None:
+    target_dir = Path(cli.out_dir).resolve()
+else:
+    target_dir = (Path(__file__).parent.parent / "data" / "tldr_prompts_unique").resolve()
 target_dir.mkdir(parents=True, exist_ok=True)
 prompt_ds.save_to_disk(str(target_dir))
 print(f"\nSaved HF dataset to: {target_dir}")
@@ -116,7 +128,6 @@ print(f"\nSaved HF dataset to: {target_dir}")
 for split in ["train", "validation"]:
     out_jsonl = target_dir / f"{split}.jsonl"
     with out_jsonl.open("w", encoding="utf-8") as f:
-        import json
         for row in prompt_ds[split]:
             f.write(json.dumps({"prompt": row["prompt"]}, ensure_ascii=False) + "\n")
     print(f"Exported {split} to: {out_jsonl}")

@@ -1,74 +1,121 @@
-#!/bin/bash
-#SBATCH --job-name=qwen3-sft
-#SBATCH --account=infra01
-#SBATCH --partition=normal
-#SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=4
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=240000
-#SBATCH --time=04:00:00
-#SBATCH --output=/users/%u/output/wildfeedback-sft/%j.log
-#SBATCH --error=/users/%u/output/wildfeedback-sft/%j.err
-#SBATCH --environment=sample-efficient-rlvr
-#SBATCH --exclude=nid007004,nid006606,nid006684,nid006638,nid006569,nid006622,nid006571,nid006877,nid006817,nid006866,nid006927,nid007223
+#!/usr/bin/env bash
+set -euo pipefail
 
-REPO="/users/$USER/test-time-alignment"
-CONFIG_PATH="$REPO/multigpu_accelerate_config.yaml"
+# Supervised fine-tuning on WildFeedback (or any JSONL).
+#
+# Usage:
+#   TRAIN_JSONL=/path/to/wildfeedback_interactions.jsonl ./scripts/sft_wildfeedback.sbatch [--dry-run]
+#
+# Common overrides:
+#   BASE_MODEL="Qwen/Qwen3-8B" ./scripts/sft_wildfeedback.sbatch
+#   LR=2e-6 BS=4 GA=2 ./scripts/sft_wildfeedback.sbatch
+#   WORLD_SIZE=4 ./scripts/sft_wildfeedback.sbatch
+#   ACCELERATE_CONFIG=./multigpu_accelerate_config.yaml ./scripts/sft_wildfeedback.sbatch
 
-SCRATCH_DIR="${SCRATCH:-/tmp}/qwen3-sft-${SLURM_JOB_ID}"
-mkdir -p "$SCRATCH_DIR"/{hf,datasets,hub,wandb,pip}
+DRY_RUN=false
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=true
+  echo "Dry run mode enabled. Commands will be printed but not executed."
+fi
 
-export HF_HOME="$SCRATCH_DIR/hf"
-export HF_DATASETS_CACHE="$SCRATCH_DIR/datasets"
-export TRANSFORMERS_CACHE="$SCRATCH_DIR/hub"
-export WANDB_DIR="$SCRATCH_DIR/wandb"
-export PIP_CACHE_DIR="$SCRATCH_DIR/pip"
-export TOKENIZERS_PARALLELISM="false"
-export WANDB_PROJECT="wildfeedback-sft"
-export WANDB_NAME="qwen3-4b-sft-${SLURM_JOB_ID}"
+run() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "$*"
+  else
+    eval "$*"
+  fi
+}
 
-# If you need auth, set HF_TOKEN in your environment (don’t hardcode it here)
-# export HF_TOKEN="..."
+# =============================================================================
+# Paths
+# =============================================================================
+REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+TRAIN_SCRIPT="${TRAIN_SCRIPT:-$REPO_ROOT/test-time-alignment/sft_wildfeedback.py}"
 
-export WANDB_PROJECT="wildfeedback-sft"
+# Optional accelerate config. If unset, we do `accelerate launch --num_processes $WORLD_SIZE`
+ACCELERATE_CONFIG="${ACCELERATE_CONFIG:-}"
+WORLD_SIZE="${WORLD_SIZE:-4}"
 
-export PATH="$HOME/.local/bin:$PATH"
-export PYTHONPATH="$REPO:${PYTHONPATH:-}"
+# =============================================================================
+# Run configuration
+# =============================================================================
+BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-8B}"
+LR="${LR:-2e-6}"
+BS="${BS:-4}"
+GA="${GA:-2}"
+MAX_LENGTH="${MAX_LENGTH:-2048}"
+NUM_EPOCHS="${NUM_EPOCHS:-2}"
 
-cd "$REPO" || exit 1
+TRAIN_JSONL="${TRAIN_JSONL:-}"  # REQUIRED (e.g. /path/to/wildfeedback_interactions.jsonl)
 
-python -m pip install --user --upgrade pip
+if [[ -z "$TRAIN_JSONL" ]]; then
+  echo "ERROR: TRAIN_JSONL is required (e.g. /path/to/wildfeedback_interactions.jsonl)"
+  exit 1
+fi
 
-python -m pip install --user -U transformers trl accelerate datasets wandb bitsandbytes
+# Tracking
+WANDB_PROJECT="${WANDB_PROJECT:-wildfeedback-sft}"
+WANDB_NAME="${WANDB_NAME:-sft-${BASE_MODEL//\//-}-lr${LR}-bs${BS}-ga${GA}}"
 
-export OUTPUT_DIR="/capstor/scratch/cscs/$USER/wildfeedback-sft/${SLURM_JOB_ID}"
-mkdir -p "$OUTPUT_DIR"
+# =============================================================================
+# Output + caches (portable)
+# =============================================================================
+BASE_WORK="${BASE_WORK:-${SCRATCH:-${TMPDIR:-/tmp}}}"
+RUN_ID="${RUN_ID:-sft-$(date +%Y%m%d-%H%M%S)}"
 
-export SLURM_CPU_BIND=quiet,none
+OUTPUT_DIR="${OUTPUT_DIR:-$BASE_WORK/sft-runs/$RUN_ID}"
+CACHE_DIR="${CACHE_DIR:-$BASE_WORK/sft-cache/$RUN_ID}"
 
-# Choose one:
-# MODEL_NAME="Qwen/Qwen3-4B-Base"
-MODEL_NAME="Qwen/Qwen3-4B"
+mkdir -p "$OUTPUT_DIR" "$CACHE_DIR"/{hf,datasets,hub,wandb,pip}
 
-echo "Using model: $MODEL_NAME"
+export OUTPUT_DIR
+export HF_HOME="$CACHE_DIR/hf"
+export HF_DATASETS_CACHE="$CACHE_DIR/datasets"
+export TRANSFORMERS_CACHE="$CACHE_DIR/hub"
+export WANDB_DIR="$CACHE_DIR/wandb"
+export PIP_CACHE_DIR="$CACHE_DIR/pip"
 
-DATA_PATH="$REPO/data/wildfeedback_interactions_v2.jsonl"
+export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
+export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 
-echo "Starting SFT..."
-echo "Model:  $MODEL_NAME"
-echo "Data:   $DATA_PATH"
-echo "Out:    $OUTPUT_DIR"
-echo "Accel:  $CONFIG_PATH"
+export WANDB_PROJECT
+export WANDB_NAME
 
-srun --ntasks=1 --cpu-bind=none bash -lc "
-  accelerate launch --config_file \"$CONFIG_PATH\" \"$REPO/sft_wildfeedback.py\" \
-    --model \"$MODEL_NAME\" \
-    --data \"$DATA_PATH\" \
-    --out \"$OUTPUT_DIR\" \
-    --max_length 2048 \
-    --epochs 2 \
-    --lr 2e-6 \
-    --bsz 4 \
-    --gas 2
-"
+#   export HF_TOKEN=...
+unset SSL_CERT_FILE SSL_CERT_DIR || true
+
+# =============================================================================
+# Command
+# =============================================================================
+cd "$REPO_ROOT"
+
+SCRIPT_ARGS="\"$TRAIN_SCRIPT\" \
+  --model \"$BASE_MODEL\" \
+  --data \"$TRAIN_JSONL\" \
+  --out \"$OUTPUT_DIR\" \
+  --max_length \"$MAX_LENGTH\" \
+  --epochs \"$NUM_EPOCHS\" \
+  --lr \"$LR\" \
+  --bsz \"$BS\" \
+  --gas \"$GA\""
+
+echo "REPO_ROOT=$REPO_ROOT"
+echo "OUTPUT_DIR=$OUTPUT_DIR"
+echo "CACHE_DIR=$CACHE_DIR"
+echo "BASE_MODEL=$BASE_MODEL"
+echo "LR=$LR BS=$BS GA=$GA"
+echo "MAX_LENGTH=$MAX_LENGTH NUM_EPOCHS=$NUM_EPOCHS"
+echo "TRAIN_JSONL=$TRAIN_JSONL"
+echo "WANDB_PROJECT=$WANDB_PROJECT"
+echo "WANDB_NAME=$WANDB_NAME"
+echo
+
+if [[ "${WORLD_SIZE}" -le 1 ]]; then
+  run "python $SCRIPT_ARGS"
+else
+  if [[ -n "$ACCELERATE_CONFIG" ]]; then
+    run "accelerate launch --config_file \"$ACCELERATE_CONFIG\" $SCRIPT_ARGS"
+  else
+    run "accelerate launch --num_processes \"$WORLD_SIZE\" $SCRIPT_ARGS"
+  fi
+fi

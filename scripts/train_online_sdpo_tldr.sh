@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Online SDPO training on TL;DR summarization prompts (openai/summarize_from_feedback).
+#
 # Usage:
-#   TRAIN_JSONL=/path/to/wildfeedback_interactions.jsonl ./scripts/train_offline_sdpo.sh [--dry-run]
+#   ./scripts/train_online_sdpo_tldr.sh [--dry-run]
 #
 # Common overrides:
-#   BASE_MODEL="Qwen/Qwen3-8B" ./scripts/train_offline_sdpo.sh
-#   LR=2e-6 BS=4 GA=8 ./scripts/train_offline_sdpo.sh
-#   WORLD_SIZE=4 ./scripts/train_offline_sdpo.sh
-#   ACCELERATE_CONFIG=./multigpu_accelerate_config.yaml ./scripts/train_offline_sdpo.sh
+#   MODEL_NAME_OR_PATH="Qwen/Qwen3-4B" ./scripts/train_online_sdpo_tldr.sh
+#   TRAIN_JSONL=/data/tldr/train.jsonl VAL_JSONL=/data/tldr/validation.jsonl ./scripts/train_online_sdpo_tldr.sh
+#   WORLD_SIZE=4 ./scripts/train_online_sdpo_tldr.sh
+#   ACCELERATE_CONFIG=./configs/accelerate_multigpu.yaml ./scripts/train_online_sdpo_tldr.sh
+#
+# Data preparation (run once before training):
+#   python auxiliary/process_tldr_dataset.py --out_dir /path/to/tldr_data
 
 DRY_RUN=false
 if [[ "${1:-}" == "--dry-run" ]]; then
@@ -28,7 +33,7 @@ run() {
 # Paths
 # =============================================================================
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-TRAIN_SCRIPT="${TRAIN_SCRIPT:-$REPO_ROOT/main_offline_sdpo.py}"
+TRAIN_SCRIPT="${TRAIN_SCRIPT:-$REPO_ROOT/main_online_sdpo.py}"
 
 # Optional accelerate config. If unset, we do `accelerate launch --num_processes $WORLD_SIZE`
 ACCELERATE_CONFIG="${ACCELERATE_CONFIG:-}"
@@ -37,30 +42,30 @@ WORLD_SIZE="${WORLD_SIZE:-4}"
 # =============================================================================
 # Run configuration
 # =============================================================================
-BASE_MODEL="${BASE_MODEL:-Qwen/Qwen3-8B}"
-LR="${LR:-2e-6}"
+MODEL_NAME_OR_PATH="${MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B}"
+USER_MODEL_NAME_OR_PATH="${USER_MODEL_NAME_OR_PATH:-Qwen/Qwen3-4B}"
+LR="${LR:-5e-6}"
 BS="${BS:-4}"
-GA="${GA:-8}"
+GA="${GA:-1}"
+STYLE="${STYLE:-concise_casual_beginner}"
 
-TRAIN_JSONL="${TRAIN_JSONL:-}"  # REQUIRED (e.g. /path/to/wildfeedback_interactions.jsonl)
+SYSTEM_PROMPT="${SYSTEM_PROMPT:-tldr}"  # tldr|general (matches your python CLI)
 
-if [[ -z "$TRAIN_JSONL" ]]; then
-  echo "ERROR: TRAIN_JSONL is required (e.g. /path/to/wildfeedback_interactions.jsonl)"
-  exit 1
-fi
-
-# Tracking
-WANDB_PROJECT="${WANDB_PROJECT:-wildfeedback}"
-WANDB_NAME="${WANDB_NAME:-offline-sdpo-${BASE_MODEL//\//-}-lr${LR}-bs${BS}-ga${GA}}"
+TRAIN_JSONL="${TRAIN_JSONL:-/path/to/tldr_data/train.jsonl}"
+VAL_JSONL="${VAL_JSONL:-/path/to/tldr_data/validation.jsonl}"
+TRAIN_N="${TRAIN_N:-256}"
+EVAL_N="${EVAL_N:-256}"
+MAX_PROMPT_TOKENS="${MAX_PROMPT_TOKENS:-512}"
+SEED="${SEED:-42}"
 
 # =============================================================================
 # Output + caches (portable)
 # =============================================================================
 BASE_WORK="${BASE_WORK:-${SCRATCH:-${TMPDIR:-/tmp}}}"
-RUN_ID="${RUN_ID:-sdpo-offline-$(date +%Y%m%d-%H%M%S)}"
+RUN_ID="${RUN_ID:-sdpo-tldr-$(date +%Y%m%d-%H%M%S)}"
 
-OUTPUT_DIR="${OUTPUT_DIR:-$BASE_WORK/sdpo-offline-runs/$RUN_ID}"
-CACHE_DIR="${CACHE_DIR:-$BASE_WORK/sdpo-offline-cache/$RUN_ID}"
+OUTPUT_DIR="${OUTPUT_DIR:-$BASE_WORK/sdpo-tldr-runs/$RUN_ID}"
+CACHE_DIR="${CACHE_DIR:-$BASE_WORK/sdpo-tldr-cache/$RUN_ID}"
 
 mkdir -p "$OUTPUT_DIR" "$CACHE_DIR"/{hf,datasets,hub,wandb,pip}
 
@@ -70,12 +75,10 @@ export HF_DATASETS_CACHE="$CACHE_DIR/datasets"
 export TRANSFORMERS_CACHE="$CACHE_DIR/hub"
 export WANDB_DIR="$CACHE_DIR/wandb"
 export PIP_CACHE_DIR="$CACHE_DIR/pip"
-
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
-export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 
-export WANDB_PROJECT
-export WANDB_NAME
+export WANDB_PROJECT="${WANDB_PROJECT:-tldr}"
+export WANDB_NAME="${WANDB_NAME:-sdpo-tldr-${STYLE}-lr${LR}-bs${BS}-ga${GA}-${RUN_ID}}"
 
 #   export HF_TOKEN=...
 unset SSL_CERT_FILE SSL_CERT_DIR || true
@@ -87,19 +90,26 @@ cd "$REPO_ROOT"
 
 SCRIPT_ARGS="\"$TRAIN_SCRIPT\" \
   --learning_rate \"$LR\" \
-  --batch_size \"$BS\" \
-  --grad_accum \"$GA\" \
-  --base_model \"$BASE_MODEL\" \
-  --train_jsonl \"$TRAIN_JSONL\""
+  --per_device_train_batch_size \"$BS\" \
+  --gradient_accumulation_steps \"$GA\" \
+  --style \"$STYLE\" \
+  --model_name_or_path \"$MODEL_NAME_OR_PATH\" \
+  --user_model_name_or_path \"$USER_MODEL_NAME_OR_PATH\" \
+  --system_prompt \"$SYSTEM_PROMPT\" \
+  --train_jsonl \"$TRAIN_JSONL\" \
+  --val_jsonl \"$VAL_JSONL\" \
+  --train_n \"$TRAIN_N\" \
+  --eval_n \"$EVAL_N\" \
+  --max_prompt_tokens \"$MAX_PROMPT_TOKENS\" \
+  --seed \"$SEED\""
 
 echo "REPO_ROOT=$REPO_ROOT"
 echo "OUTPUT_DIR=$OUTPUT_DIR"
 echo "CACHE_DIR=$CACHE_DIR"
-echo "BASE_MODEL=$BASE_MODEL"
-echo "LR=$LR BS=$BS GA=$GA"
+echo "MODEL_NAME_OR_PATH=$MODEL_NAME_OR_PATH"
+echo "LR=$LR BS=$BS GA=$GA STYLE=$STYLE SYSTEM_PROMPT=$SYSTEM_PROMPT USER_MODEL=$USER_MODEL_NAME_OR_PATH"
 echo "TRAIN_JSONL=$TRAIN_JSONL"
-echo "WANDB_PROJECT=$WANDB_PROJECT"
-echo "WANDB_NAME=$WANDB_NAME"
+echo "VAL_JSONL=$VAL_JSONL"
 echo
 
 if [[ "${WORLD_SIZE}" -le 1 ]]; then
